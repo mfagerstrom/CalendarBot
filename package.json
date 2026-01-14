@@ -1,0 +1,61 @@
+{
+  "name": "calendar_bot",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "build/calendarBot.js",
+  "scripts": {
+    "build": "rimraf ./build && tsc",
+    "buildDev": "rimraf ./build && tsc && node --no-warnings=ExperimentalWarning --loader ts-node/esm/transpile-only src/calendarBot.ts",
+    "buildProd": "pm2 delete calendarBot && rimraf ./build && tsc && pm2 start build/calendarBot.js",
+    "bs": "tsc && node build/calendarBot.js",
+    "dev": "node --no-warnings=ExperimentalWarning --loader ts-node/esm/transpile-only src/calendarBot.ts",
+    "start": "node build/calendarBot.js",
+    "start:prod": "pm2 start build/calendarBot.js",
+    "watch": "nodemon --exec npm run dev --watch src --ext ts",
+    "compile": "npx tsc --noEmit",
+    "lint": "npx eslint"
+  },
+  "dependencies": {
+    "@discordx/importer": "^1.3.1",
+    "@discordx/pagination": "^3.5.4",
+    "@stylistic/eslint-plugin": "^5.6.1",
+    "apicalypse": "^1.0.5",
+    "axios": "^1.7.7",
+    "cheerio": "^1.0.0",
+    "discord.js": "^14.15.3",
+    "discordx": "^11.11.1",
+    "dotenv": "^16.4.5",
+    "eslint": "^9.37.0",
+    "eslint-config-prettier": "^10.1.8",
+    "fast-levenshtein": "^3.0.0",
+    "glob": "^11.1.0",
+    "globals": "^16.4.0",
+    "googleapis": "^144.0.0",
+    "jiti": "^2.6.1",
+    "luxon": "^3.7.2",
+    "mongoose": "^8.8.3",
+    "oracledb": "^6.10.0",
+    "pm2": "^6.0.11",
+    "reflect-metadata": "^0.2.2",
+    "typescript-eslint": "^8.46.1",
+    "user-agents": "^1.1.325"
+  },
+  "devDependencies": {
+    "@types/fast-levenshtein": "^0.0.4",
+    "@types/luxon": "^3.7.1",
+    "@types/node": "^20.14.4",
+    "@types/oracledb": "^6.10.0",
+    "@types/user-agents": "^1.0.4",
+    "nodemon": "^3.1.3",
+    "prettier": "^3.3.2",
+    "rimraf": "^6.1.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=7.0.0"
+  }
+}
