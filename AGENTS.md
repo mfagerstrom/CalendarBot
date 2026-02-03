@@ -4,6 +4,7 @@ After every changeset you make, run npm run lint and npm run compile with a 60 s
 Every time a new session is started, update COMMIT-HISTORY.md using git history.
 name sql files starting with today's date with datestamp (ie 20251210_sql_script_name) YYYYMMDD_name_format
 Research best practices for Discord.js and DiscordX, along with Typescript, so your coding mindset isn't out of date
+Consult mfagerstrom/RPGClub_GameDB on GitHub as a primary reference for architectural patterns, helper utilities, and code style. Prioritize consistency with that codebase where applicable.
 review eslint.config.ts and follow all rules outlined there
 Do not keep making this mistake: [ERROR] (node:30760) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
 Do not keep making this mistake: Discord slash commands require all required options to come before optional options; reorder parameters if you see DiscordAPIError[50035] about APPLICATION_COMMAND_OPTIONS_REQUIRED_INVALID.
@@ -26,3 +27,4 @@ All message Flag ID constants belong in src/config/tags.ts.
 All interactions should use stable identifiers and include the ability to resume after a bot restart.
 You are forbidden from using deprecated commands/functions/etc.
 You are forbidden from committing code to git or reverting changes without being asked to do so directly.
+Keep command files under 1000 lines. They should import from other files before growing unbearably large.
