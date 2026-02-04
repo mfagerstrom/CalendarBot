@@ -2,8 +2,16 @@ import "reflect-metadata";
 import "dotenv/config";
 import { dirname, importx } from "@discordx/importer";
 import { Client } from "discordx";
-import { GatewayIntentBits } from "discord.js";
+import { GatewayIntentBits, Interaction } from "discord.js";
 import express from "express";
+import { initDB } from "./lib/db/oracle.js";
+import { getOAuth2Client } from "./lib/google/auth.js";
+import { saveUserTokens } from "./services/googleAuthService.js";
+import { installConsoleLogging, setConsoleLoggingClient } from "./lib/discord/consoleLogger.js";
+import { startCalendarSyncService } from "./services/schedulerService.js";
+
+// Initialize console logging
+installConsoleLogging();
 
 // Web server for OAuth callback
 const app = express();
@@ -19,30 +27,45 @@ app.get("/oauth2callback", async (req, res) => {
   }
 
   // TODO: Validate 'state' matches a pending user request (CSRF protection) and get the userId.
-  // For now, we print it.
-  console.log(`Received code for state (userId): ${state}`);
+  // For now, using state as userId
+  const discordUserId = state;
+  console.log(`Received code for discordUserId: ${discordUserId}`);
 
   try {
-    // In a real implementation, we would exchange the code here.
-    // const { tokens } = await oauth2Client.getToken(code);
-    // oauth2Client.setCredentials(tokens);
-    // Save tokens to DB for the user identified by 'state'
+    const oauth2Client = getOAuth2Client();
+    const { tokens } = await oauth2Client.getToken(code);
+    
+    // Save tokens to DB
+    await saveUserTokens(discordUserId, tokens);
+    console.log(`Tokens saved for user ${discordUserId}`);
 
-    res.send("Authentication successful! You can now close this window and return to Discord.");
+    res.send("Authentication successful! You have connected your Google Calendar to CalendarBot. You can close this window.");
   } catch (error) {
     console.error("Error during authentication", error);
-    res.status(500).send("Authentication failed.");
+    res.status(500).send("Authentication failed. Check bot logs for details.");
   }
 });
 
 
-const client = new Client({
+export const client = new Client({
   intents: [GatewayIntentBits.Guilds],
+  botGuilds: process.env.GUILD_ID ? [process.env.GUILD_ID] : undefined,
+  silent: false, // Enable debug logging for discordx
 });
 
 client.once("ready", async () => {
+  // Clear global commands to avoid duplicates
+  await client.clearApplicationCommands();
   await client.initApplicationCommands();
+  
+  // Set the client for the logger so it can start sending to Discord
+  setConsoleLoggingClient(client);
+  
   console.log(`Logged in as ${client.user?.tag ?? "unknown user"}`);
+});
+
+client.on("interactionCreate", (interaction: Interaction) => {
+  client.executeInteraction(interaction);
 });
 
 const start = async () => {
@@ -54,6 +77,12 @@ const start = async () => {
   // Load commands
   const _dirname = dirname(import.meta.url);
   await importx(`${_dirname}/commands/**/*.{ts,js}`);
+
+  // Initialize DB
+  await initDB();
+
+  // Start Sync Service
+  startCalendarSyncService(client);
 
   // Start Web Server
   app.listen(PORT, () => {

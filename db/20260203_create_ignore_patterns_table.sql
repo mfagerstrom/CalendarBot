@@ -1,0 +1,16 @@
+CREATE TABLE CALENDAR_IgnorePatterns (
+    id NUMBER PRIMARY KEY,
+    user_id VARCHAR2(32) NOT NULL,
+    pattern VARCHAR2(255) NOT NULL,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE seq_ignore_patterns_id START WITH 1 INCREMENT BY 1;
+
+CREATE OR REPLACE TRIGGER trg_ignore_patterns_id
+BEFORE INSERT ON CALENDAR_IgnorePatterns
+FOR EACH ROW
+BEGIN
+  SELECT seq_ignore_patterns_id.NEXTVAL INTO :new.id FROM dual;
+END;
+/

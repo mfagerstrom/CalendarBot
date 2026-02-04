@@ -966,6 +966,77 @@ export default {
         };
       },
     },
+    "require-components-v2-flag": {
+      meta: {
+        type: "problem",
+        docs: {
+          description: "Require MessageFlags.IsComponentsV2 when using ContainerBuilder.",
+        },
+        schema: [],
+        messages: {
+            missingFlag: "Must pass MessageFlags.IsComponentsV2 (or 1 << 15) when using ContainerBuilder.",
+        },
+      },
+      create(context) {
+          const usesContainer = (componentsProp) => {
+               if (!componentsProp || !componentsProp.value) return false;
+               if (componentsProp.value.type === "ArrayExpression") {
+                   for (const elem of componentsProp.value.elements) {
+                       if (elem.type === "NewExpression" && elem.callee.name === "ContainerBuilder") {
+                           return true;
+                       }
+                       if (elem.type === "Identifier") {
+                           // Try to resolve variable
+                           const variable = context.sourceCode.getScope(elem).variables.find(v => v.name === elem.name) ||
+                                            context.sourceCode.getScope(elem).upper?.variables.find(v => v.name === elem.name);
+                           if (variable && variable.defs.length && variable.defs[0].node.init) {
+                               const init = variable.defs[0].node.init;
+                               if (init.type === "NewExpression" && init.callee.name === "ContainerBuilder") {
+                                   return true;
+                               }
+                           }
+                       }
+                   }
+               }
+               return false;
+          };
+
+          const hasV2Flag = (flagsProp) => {
+               if (!flagsProp) return false;
+               const source = context.sourceCode.getText(flagsProp.value);
+               return source.includes("IsComponentsV2") || source.includes("1 << 15") || source.includes("32768") || source.includes("COMPONENTS_V2_FLAG");
+          };
+
+          return {
+              CallExpression(node) {
+                   let calleeName = null;
+                   if (node.callee.type === "Identifier") {
+                       calleeName = node.callee.name;
+                   } else if (node.callee.type === "MemberExpression" && node.callee.property.type === "Identifier") {
+                       calleeName = node.callee.property.name;
+                   }
+
+                   if (!calleeName || (!INTERACTION_RESPONSE_METHODS.has(calleeName) && !INTERACTION_RESPONSE_HELPERS.has(calleeName))) {
+                      return;
+                   }
+                   
+                   const options = node.arguments[0];
+                   if (!options || options.type !== "ObjectExpression") return;
+                   
+                   const componentsProp = options.properties.find(p => p.key.name === "components");
+                   if (usesContainer(componentsProp)) {
+                       const flagsProp = options.properties.find(p => p.key.name === "flags");
+                       if (!hasV2Flag(flagsProp)) {
+                           context.report({
+                               node: options,
+                               messageId: "missingFlag",
+                           });
+                       }
+                   }
+              }
+          }
+      }
+    },
     "custom-id-has-matching-handler": {
       meta: {
         type: "problem",

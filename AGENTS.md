@@ -25,6 +25,19 @@ All user ID constants belong in src/config/users.ts.
 All tag ID constants belong in src/config/tags.ts.
 All message Flag ID constants belong in src/config/tags.ts.
 All interactions should use stable identifiers and include the ability to resume after a bot restart.
+Enforce guild commands only for this single-server bot. Do not register global commands.
 You are forbidden from using deprecated commands/functions/etc.
 You are forbidden from committing code to git or reverting changes without being asked to do so directly.
-Keep command files under 1000 lines. They should import from other files before growing unbearably large.
+Keep files under 1000 lines. They should import from other files before growing unbearably large.
+You are forbidden from running SQL scripts.  Prompt me to run them.
+Always use v2 discord components.
+"V2 components" means Discord's new Layout Components (Components 2.0). 
+- Do NOT use EmbedBuilder. 
+- Use `ContainerBuilder`, `TextDisplayBuilder`, `SeparatorBuilder` from `@discordjs/builders`.
+- Use `SeparatorSpacingSize` from `discord-api-types/v10`.
+- Always Pass `flags: MessageFlags.IsComponentsV2`.
+- "Spacers" are `SeparatorBuilder`. Small = `SeparatorSpacingSize.Small` (no divider), Large = `SeparatorSpacingSize.Large`.
+- Structure: Container -> [Text/Separators/ActionRows]. Do not mix Embeds with V2 components.
+Remember when you hit discord errors you don't know how to handle, reference mfagerstrom/rpgclub_gamedb on GitHub. That's a working discord bot with v2 components enabled.
+You're making too many assumptions.  If you don't understand my intent, as me questions.
+Exclude setup/admin commands (connect, calendars, debug, config) from /help content. Only show /today to keep it simple for end users.
