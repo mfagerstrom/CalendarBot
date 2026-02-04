@@ -1,5 +1,10 @@
 import { getAllUserCalendarSelections, syncCalendarEvents } from "./syncService.js";
 import { updateUserTodayMessages, ensureStaticTodayMessage, forceUpdateAllTodayMessages } from "./todayService.js";
+import {
+    updateUserWeekMessages,
+    forceUpdateAllWeekMessages,
+    ensureStaticWeekMessages,
+} from "./weekService.js";
 import { CHANNELS } from "../config/channels.js";
 import { USERS } from "../config/users.js";
 import { Client } from "discordx";
@@ -18,6 +23,7 @@ export const startCalendarSyncService = (client: Client) => {
             if (currentDate !== lastCheckedDate) {
                 console.log(`Detected date change: ${lastCheckedDate} -> ${currentDate}. Triggering refresh.`);
                 await forceUpdateAllTodayMessages(client);
+                await forceUpdateAllWeekMessages(client);
                 lastCheckedDate = currentDate;
             }
 
@@ -25,8 +31,9 @@ export const startCalendarSyncService = (client: Client) => {
             try {
                 // Ensure MIKE's calendar is in the TODAY channel
                 await ensureStaticTodayMessage(client, USERS.MIKE, CHANNELS.TODAY);
+                await ensureStaticWeekMessages(client, USERS.MIKE, CHANNELS.THIS_WEEK);
             } catch (err) {
-                console.error("Failed to ensure static today message:", err);
+                console.error("Failed to ensure static calendar messages:", err);
             }
 
             // 3. Standard Sync Loop
@@ -35,29 +42,38 @@ export const startCalendarSyncService = (client: Client) => {
 
             // We can group by User to reuse Auth client?
             // For now, simple iteration.
+            let runAddedCount = 0;
+            let runUpdatedCount = 0;
+            let runCanceledCount = 0;
+            let calendarsWithChanges = 0;
+            const usersWithChanges = new Set<string>();
             
             for (const sub of allSelections) {
                 try {
-                    const changes = await syncCalendarEvents(sub.discordUserId, sub.calendarId);
-                    if (changes && changes.length > 0) {
-                        const msg = `Found ${changes.length} updates for calendar **${sub.calendarName}** (User: ${sub.discordUserId})`;
-                        console.log(msg);
-                        
-                        // Temporary: List changes to log
-                        for (const event of changes) {
-                            const status = event.status; // confirmed, cancelled
-                            const summary = event.summary || "No Title";
-                            const start = event.start?.dateTime || event.start?.date;
-                            console.log(`- [${status}] ${summary} @ ${start}`);
-                        }
-
-                        // Trigger live update for this user
-                        console.log(`[Scheduler] Triggering live update for user ${sub.discordUserId}...`);
-                        await updateUserTodayMessages(sub.discordUserId, client);
+                    const result = await syncCalendarEvents(sub.discordUserId, sub.calendarId);
+                    if (result.totalChanges > 0) {
+                        runAddedCount += result.addedCount;
+                        runUpdatedCount += result.updatedCount;
+                        runCanceledCount += result.canceledCount;
+                        calendarsWithChanges += 1;
+                        usersWithChanges.add(sub.discordUserId);
                     }
                 } catch (err) {
                     console.error(`Error syncing calendar ${sub.calendarName} for user ${sub.discordUserId}:`, err);
                 }
+            }
+
+            for (const userId of usersWithChanges) {
+                console.log(`[Scheduler] Triggering live update for user ${userId}...`);
+                await updateUserTodayMessages(userId, client);
+                await updateUserWeekMessages(userId, client);
+            }
+
+            if (calendarsWithChanges > 0) {
+                console.log(
+                    `[Sync] ${calendarsWithChanges} calendar(s) changed: `
+                    + `added=${runAddedCount}, updated=${runUpdatedCount}, canceled=${runCanceledCount}.`,
+                );
             }
         } catch (err) {
             console.error("Critical error in sync loop:", err);

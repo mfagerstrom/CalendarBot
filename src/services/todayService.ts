@@ -5,8 +5,12 @@ import {
 } from "./googleCalendarService.js";
 import { filterEvents } from "./ignoreService.js";
 import { query } from "../lib/db/oracle.js";
-import { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder } from "@discordjs/builders";
-import { SeparatorSpacingSize } from "discord-api-types/v10";
+import { buildEventSectionsContainer, buildSimpleTextContainer } from "./eventUiService.js";
+import {
+    addDaysToYmd,
+    getYmdInTimezone,
+    toAllDayEventForYmd,
+} from "./eventDateUtils.js";
 import { Client } from "discordx";
 
 export const getTodayEventData = async (userId: string) => {
@@ -15,6 +19,7 @@ export const getTodayEventData = async (userId: string) => {
     
     // 2. Calculate Start/End
     const todayString = new Date().toLocaleDateString("en-US", { timeZone: timezone });
+    const todayIso = getYmdInTimezone(new Date(), timezone);
     const timeMin = new Date();
     timeMin.setHours(timeMin.getHours() - 24);
     const timeMax = new Date();
@@ -38,21 +43,41 @@ export const getTodayEventData = async (userId: string) => {
     }
 
     // 5. Filter for "Today"
-    const todayEvents = allEvents.filter(e => {
-        if (!e.start) return false;
-        const startStr = e.start.dateTime || e.start.date;
-        if (!startStr) return false;
-        
-        if (e.start.date) {
-            const parts = todayString.split('/');
-            const isoDate = `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
-            return e.start.date === isoDate;
-        }
-        
-        const eventDate = new Date(startStr);
-        const eventDateString = eventDate.toLocaleDateString("en-US", { timeZone: timezone });
-        return eventDateString === todayString;
-    });
+    const todayEvents = allEvents
+        .map((event) => {
+            if (!event.start) {
+                return null;
+            }
+
+            if (event.start.date) {
+                const startYmd = event.start.date;
+                const endExclusiveYmd = event.end?.date || addDaysToYmd(startYmd, 1);
+                if (todayIso >= startYmd && todayIso < endExclusiveYmd) {
+                    return toAllDayEventForYmd(event, todayIso);
+                }
+                return null;
+            }
+
+            if (event.start.dateTime) {
+                const startYmd = getYmdInTimezone(new Date(event.start.dateTime), timezone);
+                const endYmd = event.end?.dateTime
+                    ? getYmdInTimezone(new Date(event.end.dateTime), timezone)
+                    : startYmd;
+
+                if (todayIso < startYmd || todayIso > endYmd) {
+                    return null;
+                }
+
+                if (startYmd !== endYmd) {
+                    return toAllDayEventForYmd(event, todayIso);
+                }
+
+                return event;
+            }
+
+            return null;
+        })
+        .filter((event): event is any => !!event);
 
     // 5.5 Filter Ignored
     const filteredEvents = await filterEvents(userId, todayEvents);
@@ -73,51 +98,17 @@ export const getTodayEventData = async (userId: string) => {
 
 export const buildTodayResponse = (data: any) => {
     if (data.error) {
-        const errContainer = new ContainerBuilder().addTextDisplayComponents(
-            new TextDisplayBuilder().setContent(data.error)
-        );
-        return [errContainer];
+        return [buildSimpleTextContainer(data.error)];
     }
 
     const { events, timezone, todayString } = data;
 
     if (events.length === 0) {
-         const emptyContainer = new ContainerBuilder().addTextDisplayComponents(
-            new TextDisplayBuilder().setContent(`No events found for today (${todayString}) in timezone ${timezone}.`)
-         );
-         return [emptyContainer];
-    }
-
-    const allDay: string[] = [];
-    const morning: string[] = [];
-    const afternoon: string[] = [];
-    const evening: string[] = [];
-
-    for (const event of events) {
-        const summary = event.summary || "(No Title)";
-
-        if (event.start.date) {
-            allDay.push(`${summary}`);
-            continue;
-        }
-
-        if (event.start.dateTime) {
-            const d = new Date(event.start.dateTime);
-            const timeStr = d.toLocaleTimeString("en-US", { timeZone: timezone, hour: '2-digit', minute: '2-digit' });
-            
-            const hourStr = d.toLocaleTimeString("en-US", { timeZone: timezone, hour: 'numeric', hour12: false });
-            const hour = parseInt(hourStr, 10);
-            
-            const line = `**${timeStr}** - ${summary}`;
-
-            if (hour < 12) {
-                morning.push(line);
-            } else if (hour < 17) {
-                afternoon.push(line);
-            } else {
-                evening.push(line);
-            }
-        }
+        return [
+            buildSimpleTextContainer(
+                `No events found for today (${todayString}) in timezone ${timezone}.`,
+            ),
+        ];
     }
 
     const dateSubheader = new Date().toLocaleDateString("en-US", { 
@@ -128,42 +119,11 @@ export const buildTodayResponse = (data: any) => {
         year: 'numeric' 
     });
 
-    const container = new ContainerBuilder();
-    
-    container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(`# Today's Events -  ${dateSubheader}`)
-    );
-    
-    container.addSeparatorComponents(
-        new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(false)
-    );
-
-    const formatSection = (title: string, emoji: string, items: string[]) => {
-        const content = items.length > 0 ? `>>> ${items.join("\n")}` : ">>> _No events_";
-        const header = emoji ? `### ${emoji}⠀${title}` : `### ${title}`;
-        return `${header}\n${content}`;
-    };
-
-    const sections = [
-        { title: "All Day", emoji: "🌅", items: allDay },
-        { title: "Morning", emoji: "☕", items: morning },
-        { title: "Afternoon", emoji: "☀️", items: afternoon },
-        { title: "Evening", emoji: "🌙", items: evening }
-    ];
-
-    sections.forEach((section, index) => {
-         container.addTextDisplayComponents(
-            new TextDisplayBuilder().setContent(formatSection(section.title, section.emoji, section.items))
-         );
-
-         if (index < sections.length - 1) {
-             container.addSeparatorComponents(
-                new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(false)
-             );
-         }
-    });
-
-    return [container];
+    return [buildEventSectionsContainer({
+        header: `# Today's Events -  ${dateSubheader}`,
+        events,
+        timezone,
+    })];
 };
 
 export const registerTodayMessage = async (userId: string, channelId: string, messageId: string) => {

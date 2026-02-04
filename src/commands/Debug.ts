@@ -24,17 +24,27 @@ export class Debug {
             const initialContainer = new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent(`Forcing re-sync for ${calendars.length} calendars... this may take a moment.`));
             await interaction.editReply({ components: [initialContainer], flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2 } as any);
 
-            let count = 0;
+            let addedCount = 0;
+            let updatedCount = 0;
+            let canceledCount = 0;
             for (const cal of calendars) {
                 // 1. Clear State
                 await resetSyncToken(cal.calendarId);
                 
                 // 2. Trigger Sync
-                const events = await syncCalendarEvents(userId, cal.calendarId);
-                count += events.length;
+                const result = await syncCalendarEvents(userId, cal.calendarId);
+                addedCount += result.addedCount;
+                updatedCount += result.updatedCount;
+                canceledCount += result.canceledCount;
             }
 
-            const successContainer = new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent(`Sync Complete. Processed ${count} events.`));
+            const total = addedCount + updatedCount + canceledCount;
+            const successContainer = new ContainerBuilder().addTextDisplayComponents(
+                new TextDisplayBuilder().setContent(
+                    `Sync Complete. Added: ${addedCount}, Updated: ${updatedCount}, `
+                    + `Canceled: ${canceledCount}, Total: ${total}.`,
+                ),
+            );
             await interaction.editReply({ components: [successContainer], flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2 } as any);
 
         } catch (err: any) {

@@ -29,7 +29,51 @@ const updateSyncState = async (calendarId: string, syncToken: string) => {
     await query(sql, { cId: calendarId, tok: syncToken });
 };
 
-export const syncCalendarEvents = async (discordUserId: string, calendarId: string): Promise<calendar_v3.Schema$Event[]> => {
+export interface ISyncCalendarResult {
+    addedCount: number;
+    updatedCount: number;
+    canceledCount: number;
+    totalChanges: number;
+}
+
+const getExistingEventIds = async (calendarId: string, eventIds: string[]): Promise<Set<string>> => {
+    if (eventIds.length === 0) {
+        return new Set<string>();
+    }
+
+    const existing = new Set<string>();
+    const chunkSize = 900;
+
+    for (let i = 0; i < eventIds.length; i += chunkSize) {
+        const chunk = eventIds.slice(i, i + chunkSize);
+        const bindNames = chunk.map((_, index) => `:id${index}`);
+        const binds: Record<string, string> = { cId: calendarId };
+        chunk.forEach((eventId, index) => {
+            binds[`id${index}`] = eventId;
+        });
+
+        const sql = `
+            SELECT EVENT_ID
+            FROM CALENDAR_EVENTS
+            WHERE CALENDAR_ID = :cId
+            AND EVENT_ID IN (${bindNames.join(", ")})
+        `;
+
+        const rows = await query<any>(sql, binds);
+        for (const row of rows) {
+            if (row.EVENT_ID) {
+                existing.add(row.EVENT_ID);
+            }
+        }
+    }
+
+    return existing;
+};
+
+export const syncCalendarEvents = async (
+    discordUserId: string,
+    calendarId: string,
+): Promise<ISyncCalendarResult> => {
     const auth = await getAuthenticatedClient(discordUserId);
     const calendar = google.calendar({ version: "v3", auth });
 
@@ -90,22 +134,37 @@ export const syncCalendarEvents = async (discordUserId: string, calendarId: stri
     }
 
     if (allEvents.length > 0) {
-        await saveEventsToDB(calendarId, allEvents);
-        // console.log(`Found ${allEvents.length} changed events.`);
-        // TODO: Process these events (announce them?)
-        return allEvents;
+        return saveEventsToDB(calendarId, allEvents);
     }
 
-    return [];
+    return {
+        addedCount: 0,
+        updatedCount: 0,
+        canceledCount: 0,
+        totalChanges: 0,
+    };
 };
 
-const saveEventsToDB = async (calendarId: string, events: calendar_v3.Schema$Event[]) => {
+const saveEventsToDB = async (
+    calendarId: string,
+    events: calendar_v3.Schema$Event[],
+): Promise<ISyncCalendarResult> => {
+    const eventIds = events.map((event) => event.id).filter((eventId): eventId is string => !!eventId);
+    const existingEventIds = await getExistingEventIds(calendarId, eventIds);
+
+    let addedCount = 0;
+    let updatedCount = 0;
+    let canceledCount = 0;
+
     for (const event of events) {
         if (!event.id) continue;
 
         if (event.status === 'cancelled') {
              await query(`DELETE FROM CALENDAR_EVENTS WHERE CALENDAR_ID = :cId AND EVENT_ID = :eId`, 
                 { cId: calendarId, eId: event.id });
+             if (existingEventIds.has(event.id)) {
+                 canceledCount += 1;
+             }
              continue;
         }
 
@@ -149,6 +208,12 @@ const saveEventsToDB = async (calendarId: string, events: calendar_v3.Schema$Eve
         const summary = (event.summary || '').substring(0, 1000);
         const descr = (event.description || '').substring(0, 4000);
         const loc = (event.location || '').substring(0, 1000);
+
+        if (existingEventIds.has(event.id)) {
+            updatedCount += 1;
+        } else {
+            addedCount += 1;
+        }
         
         await query(sql, {
             cId: calendarId,
@@ -163,6 +228,13 @@ const saveEventsToDB = async (calendarId: string, events: calendar_v3.Schema$Eve
             link: event.htmlLink || ''
         });
     }
+
+    return {
+        addedCount,
+        updatedCount,
+        canceledCount,
+        totalChanges: addedCount + updatedCount + canceledCount,
+    };
 };
 
 export const getAllUserCalendarSelections = async (): Promise<{ discordUserId: string, calendarId: string, calendarName: string }[]> => {
