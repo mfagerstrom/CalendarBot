@@ -49,7 +49,7 @@ const bucketEventsByTime = (events: ICalendarEventLike[], timezone: string) => {
                 hour12: false,
             });
             const hour = parseInt(hourStr, 10);
-            const line = `\` ${timeStr} \` - ${summary}`;
+            const line = `\` ${timeStr} \`⠀${summary}`;
 
             if (hour < 12) {
                 morning.push(line);

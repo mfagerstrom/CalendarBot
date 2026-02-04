@@ -9,6 +9,7 @@ import { getOAuth2Client } from "./lib/google/auth.js";
 import { saveUserTokens } from "./services/googleAuthService.js";
 import { installConsoleLogging, setConsoleLoggingClient } from "./lib/discord/consoleLogger.js";
 import { startCalendarSyncService } from "./services/schedulerService.js";
+import { installChannelModerationService } from "./services/channelModerationService.js";
 
 // Initialize console logging
 installConsoleLogging();
@@ -48,10 +49,15 @@ app.get("/oauth2callback", async (req, res) => {
 
 
 export const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+  ],
   botGuilds: process.env.GUILD_ID ? [process.env.GUILD_ID] : undefined,
   silent: false, // Enable debug logging for discordx
 });
+
+let servicesStarted = false;
 
 client.once("ready", async () => {
   // Clear global commands to avoid duplicates
@@ -60,6 +66,12 @@ client.once("ready", async () => {
   
   // Set the client for the logger so it can start sending to Discord
   setConsoleLoggingClient(client);
+
+  if (!servicesStarted) {
+    startCalendarSyncService(client);
+    installChannelModerationService(client);
+    servicesStarted = true;
+  }
   
   console.log(`Logged in as ${client.user?.tag ?? "unknown user"}`);
 });
@@ -80,9 +92,6 @@ const start = async () => {
 
   // Initialize DB
   await initDB();
-
-  // Start Sync Service
-  startCalendarSyncService(client);
 
   // Start Web Server
   app.listen(PORT, () => {

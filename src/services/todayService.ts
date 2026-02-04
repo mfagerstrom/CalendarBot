@@ -11,6 +11,7 @@ import {
     getYmdInTimezone,
     toAllDayEventForYmd,
 } from "./eventDateUtils.js";
+import { CHANNELS } from "../config/channels.js";
 import { Client } from "discordx";
 
 export const getTodayEventData = async (userId: string) => {
@@ -223,6 +224,10 @@ export const updateUserTodayMessages = async (userId: string, client: Client) =>
             const channel = await client.channels.fetch(row.CHANNEL_ID);
             if (!channel || !channel.isTextBased()) {
                  console.log(`[LiveUpdate] Channel ${row.CHANNEL_ID} unavailable.`);
+                 await query(
+                    `DELETE FROM CALENDAR_TodayMessages WHERE USER_ID = :userid AND CHANNEL_ID = :channelid`,
+                    { userid: userId, channelid: row.CHANNEL_ID },
+                 );
                  continue;
             }
             
@@ -237,7 +242,27 @@ export const updateUserTodayMessages = async (userId: string, client: Client) =>
             }
         } catch (err: any) {
             console.error(`[LiveUpdate] Failed to update message ${row.MESSAGE_ID} in channel ${row.CHANNEL_ID}: ${err.message}`);
-            // Optionally delete from DB if message not found (404)
+
+            if (err?.code === 10008 || err?.code === 10003) {
+                await query(
+                    `DELETE FROM CALENDAR_TodayMessages WHERE USER_ID = :userid AND CHANNEL_ID = :channelid`,
+                    { userid: userId, channelid: row.CHANNEL_ID },
+                );
+                console.log(
+                    `[LiveUpdate] Removed stale Today registration for user ${userId} in channel ${row.CHANNEL_ID}.`,
+                );
+
+                if (err?.code === 10008 && row.CHANNEL_ID === CHANNELS.TODAY) {
+                    try {
+                        await ensureStaticTodayMessage(client, userId, row.CHANNEL_ID);
+                        console.log(
+                            `[LiveUpdate] Reposted static Today message in channel ${row.CHANNEL_ID}.`,
+                        );
+                    } catch (repostErr) {
+                        console.error("Failed to repost static Today message:", repostErr);
+                    }
+                }
+            }
         }
     }
 };

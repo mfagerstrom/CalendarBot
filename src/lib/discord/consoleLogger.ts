@@ -135,10 +135,13 @@ async function sendToDiscord(level: ConsoleLevel, message: string): Promise<void
 
     const prefix = `[${level.toUpperCase()}] `;
     const text = prefix + message;
+    const shouldWrapInCodeBlock = level === "error" || level === "warn";
+    const maxTextLength = shouldWrapInCodeBlock ? MAX_DESCRIPTION_LENGTH - 8 : MAX_DESCRIPTION_LENGTH;
     const trimmed =
-      text.length > MAX_DESCRIPTION_LENGTH ? text.slice(0, MAX_DESCRIPTION_LENGTH - 3) + "..." : text;
+      text.length > maxTextLength ? text.slice(0, maxTextLength - 3) + "..." : text;
+    const description = shouldWrapInCodeBlock ? `\`\`\`\n${trimmed}\n\`\`\`` : trimmed;
     const embed = new EmbedBuilder()
-      .setDescription(trimmed)
+      .setDescription(description)
       .setColor(LEVEL_COLORS[level] ?? LEVEL_COLORS.log)
       .setTimestamp(new Date());
 
