@@ -10,6 +10,7 @@ CalendarBot is a private Discord bot for my family of six to coordinate calendar
 
 ## User Commands
 - `/today` List all events occurring today across your selected calendars
+- `/todo` List and manage GitHub issues for the project
 
 ## Setup
 1. Create a Discord application and add the bot to your guild.
@@ -28,6 +29,11 @@ ORACLE_USER=
 ORACLE_PASSWORD=
 ORACLE_CONNECT_STRING=
 ENCRYPTION_KEY=
+GITHUB_REPO_OWNER=
+GITHUB_REPO_NAME=
+GITHUB_APP_ID=
+GITHUB_APP_INSTALLATION_ID=
+GITHUB_APP_PRIVATE_KEY=
 ```
 
 ## Development

@@ -3,6 +3,8 @@ import { DB_CONFIG } from "../../config/database.js";
 
 // Ensure result sets are returned as objects instead of arrays
 oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
+// Fetch CLOBs as strings to avoid [object Object] output
+oracledb.fetchAsString = [oracledb.CLOB];
 // Auto-commit is generally convenient for simple bot operations, but be careful with transactions
 oracledb.autoCommit = true;
 
