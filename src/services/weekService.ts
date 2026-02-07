@@ -20,41 +20,19 @@ export const getWeekEventData = async (userId: string) => {
     // 1. Get Timezone
     const timezone = await getPrimaryCalendarTimezone(userId);
 
-    // 2. Calculate Start (Monday) and End (Sunday) of current week in User TZ
-    // We rely on "current time" in the user's timezone to find "today", then rewind to Monday.
-    
-    // Hacky but effective way to get "local" date parts
-    const now = new Date();
-    const isoInTz = now.toLocaleString("en-US", { timeZone: timezone });
-    const localDate = new Date(isoInTz); // strict local time object
+    const rangeLengthDays = 30;
 
-    // Find Monday (Day 1). Sunday is Day 0 in JS.
-    // If today is Sunday (0), we want previous Monday (-6 days).
-    // If today is Monday (1), we want today (0 days).
-    const day = localDate.getDay(); 
-    const diffToMonday = localDate.getDate() - day + (day === 0 ? -6 : 1);
+    // 2. Calculate rolling 30 day window starting tomorrow in User TZ
+    const todayYmd = getYmdInTimezone(new Date(), timezone);
+    const startYmd = addDaysToYmd(todayYmd, 1);
+    const endYmd = addDaysToYmd(startYmd, rangeLengthDays - 1);
     
-    const monday = new Date(localDate);
-    monday.setDate(diffToMonday);
-    monday.setHours(0, 0, 0, 0);
-
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    sunday.setHours(23, 59, 59, 999);
-    
-    // Convert back to real UTC Date objects for the API call?
-    // The Google API takes ISO strings. If we pass the constructed dates (which are "local" values but stored in a Date object so they look like UTC or system local), 
-    // we need to be careful. 
-    // Actually, `getEventsForTimeRange` takes Date objects and calls `toISOString()`.
-    // If I created `monday` as "2026-02-02 00:00:00" (system local), and the system is UTC, `toISOString` is fine.
-    // BUT if the user is in Tokyo (+9) and I perform math there, I need to ensure the query range covers the absolute time.
-    
-    // Safer bet: Query a wide range (Just roughly -7 to +7 days from now) and filter precisely in code using the timezone string.
+    // Safer bet: Query a wide range and filter precisely in code using the timezone string.
     
     const queryMin = new Date();
     queryMin.setDate(queryMin.getDate() - 7);
     const queryMax = new Date();
-    queryMax.setDate(queryMax.getDate() + 14);
+    queryMax.setDate(queryMax.getDate() + rangeLengthDays + 7);
 
     // 3. Get Calendars
     const calendars = await getUserSelectedCalendars(userId);
@@ -79,32 +57,25 @@ export const getWeekEventData = async (userId: string) => {
     // Format for comparison: YYYY-MM-DD in User TZ
     // const getLocalYMD = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: timezone }); // YYYY-MM-DD
     
-    // Generate the 7 string keys for the week
+    // Generate the string keys for the range
     const weekMap = new Map<string, any[]>();
     const dateHeaders = new Map<string, string>(); // "2026-02-02" -> "Monday, Feb 2"
-    
-    // const cursor = new Date(monday);
-    for (let i = 0; i < 7; i++) {
-        // We need to shift the 'cursor' carefully to mimic the User TZ stepping
-        // Best way: Create a date object or string for that specific day in the TZ.
-        
-        // Let's iterate using the `monday` object we built. Ideally we should reconstruct it properly.
-        // Actually, let's just use the `toLocaleDateString` logic directly.
-        // If we step 24h at a time, we might hit DST issues.
-        // Safer: add `i` days to the base date.
-        
-        const d = new Date(monday);
-        d.setDate(monday.getDate() + i);
-        
-        // This 'd' is a fake local date object. 
-        // We can't use "timeZone: timezone" on it because it IS already shifted (conceptually).
-        // Let's just assume "YYYY-MM-DD" from its own getFullYear/etc is the key.
-        const key = d.toISOString().split('T')[0];
-        
-        const header = d.toLocaleDateString("en-US", { weekday: 'long', month: 'short', day: 'numeric' });
-        
-        weekMap.set(key, []);
-        dateHeaders.set(key, header);
+
+    const dateRange = iterateYmdRangeInclusive(startYmd, endYmd);
+    for (const ymd of dateRange) {
+        weekMap.set(ymd, []);
+        const [yearStr, monthStr, dayStr] = ymd.split("-");
+        const year = Number(yearStr);
+        const monthIndex = Number(monthStr) - 1;
+        const day = Number(dayStr);
+        const headerDate = new Date(Date.UTC(year, monthIndex, day));
+        const header = headerDate.toLocaleDateString("en-US", {
+            weekday: "long",
+            month: "short",
+            day: "numeric",
+            timeZone: "UTC",
+        });
+        dateHeaders.set(ymd, header);
     }
 
     // 5.5 Filter Ignored
@@ -167,8 +138,8 @@ export const getWeekEventData = async (userId: string) => {
         weekMap,
         dateHeaders,
         timezone,
-        startLabel: dateHeaders.get(Array.from(dateHeaders.keys())[0]),
-        endLabel: dateHeaders.get(Array.from(dateHeaders.keys())[6])
+        startLabel: dateHeaders.get(startYmd),
+        endLabel: dateHeaders.get(endYmd)
     };
 };
 
@@ -180,15 +151,8 @@ export const buildWeekResponse = (data: any) => {
     const { weekMap, dateHeaders, timezone } = data;
 
     const messageComponents: ContainerBuilder[][] = [];
-    const allWeekEvents = Array.from(weekMap.values()).flat();
-    if (allWeekEvents.length === 0) {
-        return [[buildSimpleTextContainer("No events found for this week.")]];
-    }
 
     for (const [key, events] of weekMap.entries()) {
-        if (events.length === 0) {
-            continue;
-        }
         const headerTitle = dateHeaders.get(key) || "Day";
         const dayContainer = buildEventSectionsContainer({
             header: `# ${headerTitle}`,
@@ -198,9 +162,7 @@ export const buildWeekResponse = (data: any) => {
         messageComponents.push([dayContainer]);
     }
 
-    return messageComponents.length > 0
-        ? messageComponents
-        : [[buildSimpleTextContainer("No events found for this week.")]];
+    return messageComponents;
 };
 
 const isMissingWeekMessagesTableError = (err: any): boolean => {
