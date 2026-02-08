@@ -8,6 +8,7 @@ import {
 import { CHANNELS } from "../config/channels.js";
 import { USERS } from "../config/users.js";
 import { Client } from "discordx";
+import { processReminders } from "./reminderService.js";
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 let lastCheckedDate = new Date().toDateString();
@@ -68,6 +69,8 @@ export const startCalendarSyncService = (client: Client) => {
                 await updateUserTodayMessages(userId, client);
                 await updateUserWeekMessages(userId, client);
             }
+
+            await processReminders(client);
 
             if (calendarsWithChanges > 0) {
                 console.log(

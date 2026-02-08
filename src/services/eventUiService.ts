@@ -3,6 +3,7 @@ import { SeparatorSpacingSize } from "discord-api-types/v10";
 
 export interface ICalendarEventLike {
     summary?: string | null;
+    reminder?: boolean;
     start?: {
         date?: string | null;
         dateTime?: string | null;
@@ -21,6 +22,12 @@ const formatSection = (title: string, emoji: string, items: string[]) => {
     return `${header}\n${content}`;
 };
 
+const formatSummary = (summary: string, reminder?: boolean): string => {
+    if (!reminder) return summary;
+    if (summary.startsWith("**") && summary.endsWith("**")) return summary;
+    return `**${summary}**`;
+};
+
 const bucketEventsByTime = (events: ICalendarEventLike[], timezone: string) => {
     const allDay: string[] = [];
     const morning: string[] = [];
@@ -28,7 +35,8 @@ const bucketEventsByTime = (events: ICalendarEventLike[], timezone: string) => {
     const evening: string[] = [];
 
     for (const event of events) {
-        const summary = event.summary || "(No Title)";
+        const rawSummary = event.summary || "(No Title)";
+        const summary = formatSummary(rawSummary, event.reminder);
 
         if (event.start?.date) {
             allDay.push(summary);

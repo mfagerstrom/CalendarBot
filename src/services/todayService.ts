@@ -1,5 +1,4 @@
 import { 
-    getPrimaryCalendarTimezone, 
     getUserSelectedCalendars, 
     getEventsForTimeRange 
 } from "./googleCalendarService.js";
@@ -13,10 +12,11 @@ import {
 } from "./eventDateUtils.js";
 import { CHANNELS } from "../config/channels.js";
 import { Client } from "discordx";
+import { applyReminderFlags, getReminderRules } from "./reminderService.js";
 
 export const getTodayEventData = async (userId: string) => {
     // 1. Get Timezone
-    const timezone = await getPrimaryCalendarTimezone(userId);
+    const timezone = "America/New_York";
     
     // 2. Calculate Start/End
     const todayString = new Date().toLocaleDateString("en-US", { timeZone: timezone });
@@ -83,15 +83,18 @@ export const getTodayEventData = async (userId: string) => {
     // 5.5 Filter Ignored
     const filteredEvents = await filterEvents(userId, todayEvents);
 
+    const reminderRules = await getReminderRules();
+    const flaggedEvents = applyReminderFlags(filteredEvents, reminderRules);
+
     // 6. Sort
-    filteredEvents.sort((a, b) => {
+    flaggedEvents.sort((a, b) => {
         const tA = new Date(a.start.dateTime || a.start.date).getTime();
         const tB = new Date(b.start.dateTime || b.start.date).getTime();
         return tA - tB;
     });
 
     return { 
-        events: filteredEvents, 
+        events: flaggedEvents, 
         timezone, 
         todayString 
     };

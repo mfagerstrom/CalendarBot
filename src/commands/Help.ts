@@ -10,12 +10,12 @@ export class Help {
     const container = new ContainerBuilder()
         .addTextDisplayComponents(
             new TextDisplayBuilder().setContent("# CalendarBot Help"),
-            new TextDisplayBuilder().setContent("Slash commands are currently disabled."),
+            new TextDisplayBuilder().setContent("Use /today to see today's events."),
         )
         .addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small))
         .addTextDisplayComponents(
-            new TextDisplayBuilder().setContent("## Viewing Events"),
-            new TextDisplayBuilder().setContent("Check the static calendar posts in their channels."),
+            new TextDisplayBuilder().setContent("## /today"),
+            new TextDisplayBuilder().setContent("Shows events in your selected calendars for today."),
         );
 
     await interaction.reply({

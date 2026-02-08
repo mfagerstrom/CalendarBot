@@ -1,5 +1,4 @@
 import { 
-    getPrimaryCalendarTimezone, 
     getUserSelectedCalendars, 
     getEventsForTimeRange 
 } from "./googleCalendarService.js";
@@ -15,10 +14,11 @@ import {
 } from "./eventDateUtils.js";
 import { MessageFlags } from "discord.js";
 import { Client } from "discordx";
+import { applyReminderFlags, getReminderRules } from "./reminderService.js";
 
 export const getWeekEventData = async (userId: string) => {
     // 1. Get Timezone
-    const timezone = await getPrimaryCalendarTimezone(userId);
+    const timezone = "America/New_York";
 
     const rangeLengthDays = 30;
 
@@ -80,9 +80,11 @@ export const getWeekEventData = async (userId: string) => {
 
     // 5.5 Filter Ignored
     const filteredEvents = await filterEvents(userId, allEvents);
+    const reminderRules = await getReminderRules();
+    const flaggedEvents = applyReminderFlags(filteredEvents, reminderRules);
 
     // Group them, including multi-day events on each day they overlap.
-    for (const event of filteredEvents) {
+    for (const event of flaggedEvents) {
         if (!event.start) {
             continue;
         }

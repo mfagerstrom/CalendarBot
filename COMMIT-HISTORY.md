@@ -1,5 +1,6 @@
 # Commit History
 Last synced: 2026-02-07
+- 2026-02-07: c7528fe issue-4: changed 'this week' to 'looking forward', and rendered 30 days rolling
 - 2026-02-07: df789e5 issue-2: ported /todo system from RPGClub bot and fixed it so it works
 - 2026-02-05: 2b48655 chore: updated readme
 - 2026-02-05: 45ac67e chore: updated readme
