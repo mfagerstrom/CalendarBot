@@ -9,6 +9,7 @@ import { SeparatorSpacingSize } from "discord-api-types/v10";
 import { MessageFlags } from "discord.js";
 import type { Client } from "discordx";
 import { query } from "../lib/db/oracle.js";
+import { getYmdInTimezone } from "./eventDateUtils.js";
 
 interface IArrangementQueueOccurrence {
   id: number;
@@ -20,6 +21,7 @@ interface IArrangementQueueOccurrence {
   roleIds: string[];
 }
 
+const REMINDER_TIMEZONE = "America/New_York";
 const ARRANGEMENT_PING_WINDOW_DAYS = 3;
 const MAX_QUEUE_OPTIONS = 25;
 
@@ -49,19 +51,38 @@ const formatRoleMentions = (roleIds: string[]): string => {
 
 const toUnixTimestamp = (value: Date): number => Math.floor(value.getTime() / 1000);
 
-const formatWhen = (occurrence: IArrangementQueueOccurrence): string => {
-  if (occurrence.isAllDay) {
-    const utcMidnight = new Date(Date.UTC(
-      occurrence.occurrenceStart.getUTCFullYear(),
-      occurrence.occurrenceStart.getUTCMonth(),
-      occurrence.occurrenceStart.getUTCDate(),
-    ));
-    const unix = toUnixTimestamp(utcMidnight);
-    return `<t:${unix}:F> (<t:${unix}:R>)`;
+const makeDateInTimeZone = (
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  timeZone: string,
+): Date => {
+  if (timeZone === "UTC" || timeZone === "Etc/UTC") {
+    return new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0));
   }
+  const utcDate = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0));
+  const tzDate = new Date(utcDate.toLocaleString("en-US", { timeZone }));
+  const offsetMs = utcDate.getTime() - tzDate.getTime();
+  return new Date(utcDate.getTime() + offsetMs);
+};
 
-  const unix = toUnixTimestamp(occurrence.occurrenceStart);
-  return `<t:${unix}:F> (<t:${unix}:R>)`;
+const formatWhen = (occurrence: IArrangementQueueOccurrence): string => {
+  const ymd = occurrence.isAllDay
+    ? getYmdInTimezone(occurrence.occurrenceStart, "UTC")
+    : getYmdInTimezone(occurrence.occurrenceStart, REMINDER_TIMEZONE);
+  const [yearStr, monthStr, dayStr] = ymd.split("-");
+  const localMidnight = makeDateInTimeZone(
+    Number(yearStr),
+    Number(monthStr),
+    Number(dayStr),
+    0,
+    0,
+    REMINDER_TIMEZONE,
+  );
+  const unix = toUnixTimestamp(localMidnight);
+  return `<t:${unix}:D> (<t:${unix}:R>)`;
 };
 
 const buildArrangementQueueComponents = (
