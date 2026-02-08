@@ -98,6 +98,7 @@ const listUpcomingArrangementOccurrences = async (): Promise<IArrangementQueueOc
        AND evt.EVENT_ID = occ.EVENT_ID
       WHERE occ.arrangements_required = 1
         AND occ.completed_at IS NULL
+        AND occ.reminder_at <= CURRENT_TIMESTAMP
         AND occ.occurrence_start >= CURRENT_TIMESTAMP
       ORDER BY occ.occurrence_start ASC
     `,
