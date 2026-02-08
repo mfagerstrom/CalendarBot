@@ -35,6 +35,8 @@ export interface IReminderOccurrence {
 
 const REMINDER_ACK_PREFIX = "reminder-ack";
 export const REMINDER_ACK_REGEX = /^reminder-ack:\d+$/;
+const REMINDER_NOTES_PREFIX = "reminder-notes";
+export const REMINDER_NOTES_REGEX = /^reminder-notes:\d+$/;
 export const REMINDER_SNOOZE_REGEX = /^reminder-snooze:\d+$/;
 export const REMINDER_ARRANGEMENTS_REGEX = /^reminder-arrangements:\d+$/;
 
@@ -78,11 +80,11 @@ const normalizeArrangementNotes = (value: string | null | undefined): string => 
   return value.replace(/\s+/g, " ").trim();
 };
 
-const formatSummaryWithArrangements = (summary: string, arrangementsNotes?: string | null): string => {
-  const notes = normalizeArrangementNotes(arrangementsNotes);
-  if (!notes) return summary;
-  return `${summary} (${notes})`;
+const formatSummaryForReminder = (summary: string): string => {
+  return summary;
 };
+
+const toUnixTimestamp = (value: Date): number => Math.floor(value.getTime() / 1000);
 
 const makeDateInTimeZone = (
   year: number,
@@ -99,6 +101,26 @@ const makeDateInTimeZone = (
   const tzDate = new Date(utcDate.toLocaleString("en-US", { timeZone }));
   const offsetMs = utcDate.getTime() - tzDate.getTime();
   return new Date(utcDate.getTime() + offsetMs);
+};
+
+const formatDiscordDateWithRelative = (occurrence: IReminderOccurrence): string => {
+  if (occurrence.isAllDay) {
+    const ymd = getYmdInTimezone(occurrence.occurrenceStart, "UTC");
+    const [yearStr, monthStr, dayStr] = ymd.split("-");
+    const localMidnight = makeDateInTimeZone(
+      Number(yearStr),
+      Number(monthStr),
+      Number(dayStr),
+      0,
+      0,
+      REMINDER_TIMEZONE,
+    );
+    const unix = toUnixTimestamp(localMidnight);
+    return `<t:${unix}:F> (<t:${unix}:R>)`;
+  }
+
+  const unix = toUnixTimestamp(occurrence.occurrenceStart);
+  return `<t:${unix}:F> (<t:${unix}:R>)`;
 };
 
 const getAllDayUtcDate = (value: Date): Date => {
@@ -505,12 +527,66 @@ const fetchDueOccurrences = async (): Promise<IReminderOccurrence[]> => {
         AND occ.reminder_at <= CURRENT_TIMESTAMP
         AND (occ.snoozed_until IS NULL OR occ.snoozed_until <= CURRENT_TIMESTAMP)
         AND (
+          (evt.is_all_day = 1 AND TRUNC(occ.occurrence_start) >= TRUNC(CURRENT_TIMESTAMP))
+          OR (evt.is_all_day = 0 AND occ.occurrence_start >= CURRENT_TIMESTAMP)
+        )
+        AND (
           occ.arrangements_required = 0
           OR occ.occurrence_start <= (CURRENT_TIMESTAMP + INTERVAL '${ARRANGEMENT_PING_WINDOW_DAYS}' DAY)
         )
         AND (
           occ.last_prompt_at IS NULL
           OR occ.last_prompt_at <= (CURRENT_TIMESTAMP - INTERVAL '1' DAY)
+        )
+    `,
+  );
+
+  return rows.map((row) => ({
+    id: Number(row.ID),
+    ruleId: Number(row.RULE_ID),
+    calendarId: String(row.CALENDAR_ID ?? ""),
+    eventId: String(row.EVENT_ID ?? ""),
+    occurrenceStart: new Date(row.OCCURRENCE_START),
+    occurrenceEnd: row.OCCURRENCE_END ? new Date(row.OCCURRENCE_END) : null,
+    summary: String(row.SUMMARY ?? ""),
+    reminderAt: new Date(row.REMINDER_AT),
+    isAllDay: Number(row.IS_ALL_DAY ?? 0) === 1,
+    arrangementsNotes: row.ARRANGEMENTS_NOTES ? String(row.ARRANGEMENTS_NOTES) : null,
+    arrangementsRequired: Number(row.ARRANGEMENTS_REQUIRED ?? 0) === 1,
+    completedAt: row.COMPLETED_AT ? new Date(row.COMPLETED_AT) : null,
+    lastPromptAt: row.LAST_PROMPT_AT ? new Date(row.LAST_PROMPT_AT) : null,
+    snoozedUntil: row.SNOOZED_UNTIL ? new Date(row.SNOOZED_UNTIL) : null,
+    promptMessageId: row.PROMPT_MESSAGE_ID ? String(row.PROMPT_MESSAGE_ID) : null,
+  }));
+};
+
+const fetchActivePromptOccurrences = async (): Promise<IReminderOccurrence[]> => {
+  const rows = await query<any>(
+    `
+      SELECT
+        occ.id,
+        occ.rule_id,
+        occ.calendar_id,
+        occ.event_id,
+        occ.occurrence_start,
+        occ.occurrence_end,
+        occ.summary,
+        occ.reminder_at,
+        occ.arrangements_notes,
+        occ.arrangements_required,
+        occ.completed_at,
+        occ.last_prompt_at,
+        occ.snoozed_until,
+        occ.prompt_message_id,
+        evt.is_all_day
+      FROM CALENDAR_ReminderOccurrences occ
+      LEFT JOIN CALENDAR_EVENTS evt
+        ON evt.CALENDAR_ID = occ.CALENDAR_ID
+       AND evt.EVENT_ID = occ.EVENT_ID
+      WHERE occ.prompt_message_id IS NOT NULL
+        AND (
+          (evt.is_all_day = 1 AND TRUNC(occ.occurrence_start) >= TRUNC(CURRENT_TIMESTAMP))
+          OR (evt.is_all_day = 0 AND occ.occurrence_start >= CURRENT_TIMESTAMP)
         )
     `,
   );
@@ -600,6 +676,25 @@ export const completeOccurrenceWithArrangements = async (
   );
 };
 
+export const updateOccurrenceArrangementsNotes = async (
+  occurrenceId: number,
+  arrangementsNotes: string,
+): Promise<void> => {
+  const normalizedNotes = normalizeArrangementNotes(arrangementsNotes);
+  await query(
+    `
+      UPDATE CALENDAR_ReminderOccurrences
+      SET arrangements_notes = :arrangementsNotes,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = :id
+    `,
+    {
+      id: occurrenceId,
+      arrangementsNotes: normalizedNotes || null,
+    },
+  );
+};
+
 export const getOccurrenceById = async (
   occurrenceId: number,
 ): Promise<IReminderOccurrence | null> => {
@@ -651,54 +746,33 @@ export const getOccurrenceById = async (
   };
 };
 
-const buildPromptComponents = (
+export const buildPromptComponents = (
   occurrence: IReminderOccurrence,
   rule: IReminderRule | undefined,
 ): { components: ContainerBuilder[] } => {
   const title = "## Reminder";
-  const dateStr = occurrence.isAllDay
-    ? getAllDayUtcDate(occurrence.occurrenceStart).toLocaleDateString("en-US", {
-        weekday: "long",
-        month: "short",
-        day: "numeric",
-        timeZone: "UTC",
-      })
-    : occurrence.occurrenceStart.toLocaleDateString("en-US", {
-        weekday: "long",
-        month: "short",
-        day: "numeric",
-        timeZone: REMINDER_TIMEZONE,
-      });
-  const timeStr = occurrence.isAllDay
-    ? "All day"
-    : occurrence.occurrenceStart.toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: REMINDER_TIMEZONE,
-      });
+  const whenLine = `**When:** ${formatDiscordDateWithRelative(occurrence)}`;
 
-  const whenLine = occurrence.isAllDay
-    ? `**When:** ${dateStr} (${timeStr})`
-    : `**When:** ${dateStr} at ${timeStr}`;
+  const summaryLine = formatSummaryForReminder(occurrence.summary || "(No title)");
 
-  const summaryLine = formatSummaryWithArrangements(
-    occurrence.summary || "(No title)",
-    occurrence.arrangementsNotes,
-  );
-
-  const lines = [
-    `**Event:** ${summaryLine}`,
-    whenLine,
-    `**Reminder ID:** ${occurrence.id}`,
-  ];
-
+  const noteText = normalizeArrangementNotes(occurrence.arrangementsNotes);
+  const lines = [`**Event:** ${summaryLine}`, whenLine];
   const roleMentions = rule ? buildRoleMentions(rule.pingRoles) : "";
   if (roleMentions) {
-    lines.push(roleMentions);
+    lines.push(`**Affects:** ${roleMentions}`);
+  }
+  if (noteText) {
+    lines.push(`**Note:** ${noteText}`);
   }
 
+  const detailLines: string[] = [];
+
   if (occurrence.arrangementsRequired) {
-    lines.push("**Arrangements needed:** Please confirm when done.");
+    detailLines.push("-# **Arrangements needed:** Please confirm when done.");
+  }
+
+  if (detailLines.length > 0) {
+    lines.push("", ...detailLines);
   }
 
   const container = new ContainerBuilder();
@@ -717,6 +791,10 @@ const buildPromptComponents = (
         .setCustomId(`${REMINDER_ACK_PREFIX}:${occurrence.id}`)
         .setLabel("Arrangements Made")
         .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`${REMINDER_NOTES_PREFIX}:${occurrence.id}`)
+        .setLabel("Add/Edit Notes")
+        .setStyle(ButtonStyle.Secondary),
     );
 
     container.addActionRowComponents(row);
@@ -730,52 +808,28 @@ export const buildConfirmedComponents = (
   rule: IReminderRule | undefined,
 ): { components: ContainerBuilder[] } => {
   const title = "## Reminder";
-  const dateStr = occurrence.isAllDay
-    ? getAllDayUtcDate(occurrence.occurrenceStart).toLocaleDateString("en-US", {
-        weekday: "long",
-        month: "short",
-        day: "numeric",
-        timeZone: "UTC",
-      })
-    : occurrence.occurrenceStart.toLocaleDateString("en-US", {
-        weekday: "long",
-        month: "short",
-        day: "numeric",
-        timeZone: REMINDER_TIMEZONE,
-      });
-  const timeStr = occurrence.isAllDay
-    ? "All day"
-    : occurrence.occurrenceStart.toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: REMINDER_TIMEZONE,
-      });
+  const whenLine = `**When:** ${formatDiscordDateWithRelative(occurrence)}`;
 
-  const whenLine = occurrence.isAllDay
-    ? `**When:** ${dateStr} (${timeStr})`
-    : `**When:** ${dateStr} at ${timeStr}`;
+  const summaryLine = formatSummaryForReminder(occurrence.summary || "(No title)");
 
-  const summaryLine = formatSummaryWithArrangements(
-    occurrence.summary || "(No title)",
-    occurrence.arrangementsNotes,
-  );
-
-  const lines = [
-    `**Event:** ${summaryLine}`,
-    whenLine,
-    `**Reminder ID:** ${occurrence.id}`,
-  ];
-
+  const noteText = normalizeArrangementNotes(occurrence.arrangementsNotes);
+  const lines = [`**Event:** ${summaryLine}`, whenLine];
   const roleMentions = rule ? buildRoleMentions(rule.pingRoles) : "";
   if (roleMentions) {
-    lines.push(roleMentions);
+    lines.push(`**Affects:** ${roleMentions}`);
+  }
+  if (noteText) {
+    lines.push(`**Note:** ${noteText}`);
   }
 
-  const arrangementsNotes = normalizeArrangementNotes(occurrence.arrangementsNotes);
-  if (arrangementsNotes) {
-    lines.push(`**Arrangements made:** ${arrangementsNotes}`);
-  } else {
-    lines.push("**Arrangements confirmed.**");
+  const detailLines: string[] = [];
+
+  if (occurrence.arrangementsRequired && !noteText) {
+    detailLines.push("-# **Arrangements confirmed.**");
+  }
+
+  if (detailLines.length > 0) {
+    lines.push("", ...detailLines);
   }
 
   const container = new ContainerBuilder();
@@ -804,7 +858,7 @@ export const processReminders = async (client: Client): Promise<void> => {
   const dueOccurrences = await fetchDueOccurrences();
   if (!dueOccurrences.length) return;
 
-  const channel = await client.channels.fetch(CHANNELS.CALENDAR_TALK);
+  const channel = await client.channels.fetch(CHANNELS.CALENDAR_REMINDERS);
   if (!channel || !channel.isTextBased()) {
     return;
   }
@@ -821,6 +875,35 @@ export const processReminders = async (client: Client): Promise<void> => {
 
     if (!occurrence.arrangementsRequired) {
       await markCompleted(occurrence.id);
+    }
+  }
+};
+
+export const refreshActiveReminderMessages = async (client: Client): Promise<void> => {
+  const occurrences = await fetchActivePromptOccurrences();
+  if (!occurrences.length) return;
+
+  const channel = await client.channels.fetch(CHANNELS.CALENDAR_REMINDERS);
+  if (!channel || !channel.isTextBased()) {
+    return;
+  }
+
+  const rules = await getReminderRules();
+
+  for (const occurrence of occurrences) {
+    if (!occurrence.promptMessageId) continue;
+    const rule = rules.find((item) => item.id === occurrence.ruleId);
+    const payload = occurrence.completedAt
+      ? buildConfirmedComponents(occurrence, rule)
+      : buildPromptComponents(occurrence, rule);
+    try {
+      const message = await (channel as any).messages.fetch(occurrence.promptMessageId);
+      await message.edit({
+        components: payload.components,
+        flags: MessageFlags.IsComponentsV2,
+      });
+    } catch (err) {
+      console.error("Failed to refresh reminder message:", err);
     }
   }
 };

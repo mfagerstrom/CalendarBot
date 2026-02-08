@@ -8,7 +8,7 @@ import {
 import { CHANNELS } from "../config/channels.js";
 import { USERS } from "../config/users.js";
 import { Client } from "discordx";
-import { processReminders } from "./reminderService.js";
+import { processReminders, refreshActiveReminderMessages } from "./reminderService.js";
 import { ensureHelpWantedMessage } from "./helpWantedService.js";
 import { ensureArrangementQueueMessage } from "./arrangementQueueService.js";
 
@@ -87,9 +87,20 @@ export const startCalendarSyncService = (client: Client) => {
         }
     };
 
-    // Run immediately on start (or maybe delay slightly)
-    setTimeout(runSync, 10000);
+    const runStartup = async () => {
+        try {
+            await ensureArrangementQueueMessage(client, CHANNELS.ARRANGEMENTS_QUEUE);
+            await refreshActiveReminderMessages(client);
+        } catch (err) {
+            console.error("Failed to run startup refresh tasks:", err);
+        }
 
-    // Schedule
-    setInterval(runSync, SYNC_INTERVAL_MS);
+        // Run shortly after startup
+        setTimeout(runSync, 10000);
+
+        // Schedule
+        setInterval(runSync, SYNC_INTERVAL_MS);
+    };
+
+    void runStartup();
 };
