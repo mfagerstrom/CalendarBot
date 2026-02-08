@@ -9,6 +9,7 @@ import { CHANNELS } from "../config/channels.js";
 import { USERS } from "../config/users.js";
 import { Client } from "discordx";
 import { processReminders } from "./reminderService.js";
+import { ensureHelpWantedMessage } from "./helpWantedService.js";
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 let lastCheckedDate = new Date().toDateString();
@@ -33,6 +34,7 @@ export const startCalendarSyncService = (client: Client) => {
                 // Ensure MIKE's calendar is in the TODAY channel
                 await ensureStaticTodayMessage(client, USERS.MIKE, CHANNELS.TODAY);
                 await ensureStaticWeekMessages(client, USERS.MIKE, CHANNELS.THIS_WEEK);
+                await ensureHelpWantedMessage(client, CHANNELS.HELP_WANTED);
             } catch (err) {
                 console.error("Failed to ensure static calendar messages:", err);
             }
