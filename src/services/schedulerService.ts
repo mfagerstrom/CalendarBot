@@ -10,6 +10,7 @@ import { USERS } from "../config/users.js";
 import { Client } from "discordx";
 import { processReminders } from "./reminderService.js";
 import { ensureHelpWantedMessage } from "./helpWantedService.js";
+import { ensureArrangementQueueMessage } from "./arrangementQueueService.js";
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 let lastCheckedDate = new Date().toDateString();
@@ -73,6 +74,7 @@ export const startCalendarSyncService = (client: Client) => {
             }
 
             await processReminders(client);
+            await ensureArrangementQueueMessage(client, CHANNELS.ARRANGEMENTS_QUEUE);
 
             if (calendarsWithChanges > 0) {
                 console.log(

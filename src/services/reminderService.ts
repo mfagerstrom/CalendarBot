@@ -40,6 +40,7 @@ export const REMINDER_ARRANGEMENTS_REGEX = /^reminder-arrangements:\d+$/;
 
 const REMINDER_LOOKAHEAD_DAYS = 90;
 const REMINDER_TIMEZONE = "America/New_York";
+const ARRANGEMENT_PING_WINDOW_DAYS = 3;
 
 const parseRoleIds = (value: string): string[] => {
   if (!value) return [];
@@ -503,6 +504,10 @@ const fetchDueOccurrences = async (): Promise<IReminderOccurrence[]> => {
       WHERE occ.completed_at IS NULL
         AND occ.reminder_at <= CURRENT_TIMESTAMP
         AND (occ.snoozed_until IS NULL OR occ.snoozed_until <= CURRENT_TIMESTAMP)
+        AND (
+          occ.arrangements_required = 0
+          OR occ.occurrence_start <= (CURRENT_TIMESTAMP + INTERVAL '${ARRANGEMENT_PING_WINDOW_DAYS}' DAY)
+        )
         AND (
           occ.last_prompt_at IS NULL
           OR occ.last_prompt_at <= (CURRENT_TIMESTAMP - INTERVAL '1' DAY)
