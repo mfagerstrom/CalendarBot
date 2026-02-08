@@ -33,7 +33,6 @@ export interface IReminderOccurrence {
 }
 
 const REMINDER_ACK_PREFIX = "reminder-ack";
-const REMINDER_SNOOZE_PREFIX = "reminder-snooze";
 
 export const REMINDER_ACK_REGEX = /^reminder-ack:\d+$/;
 export const REMINDER_SNOOZE_REGEX = /^reminder-snooze:\d+$/;
@@ -666,10 +665,6 @@ const buildPromptComponents = (
         .setCustomId(`${REMINDER_ACK_PREFIX}:${occurrence.id}`)
         .setLabel("Yes")
         .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(`${REMINDER_SNOOZE_PREFIX}:${occurrence.id}`)
-        .setLabel("Not Yet")
-        .setStyle(ButtonStyle.Secondary),
     );
 
     container.addActionRowComponents(row);
