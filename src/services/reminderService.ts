@@ -768,7 +768,7 @@ export const buildPromptComponents = (
   const detailLines: string[] = [];
 
   if (occurrence.arrangementsRequired) {
-    detailLines.push("-# **Arrangements needed:** Please confirm when done.");
+    detailLines.push("-# **:warning: Arrangements needed:** Please confirm when done.");
   }
 
   if (detailLines.length > 0) {

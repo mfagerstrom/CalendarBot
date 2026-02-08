@@ -19,7 +19,17 @@ export interface IHelpWantedRequest {
 }
 
 const normalizeDescription = (value: string): string => {
-  return value.replace(/\s+/g, " ").trim();
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return normalized;
+
+  if (/^please\b/i.test(normalized)) {
+    return normalized;
+  }
+
+  const firstChar = normalized[0] ?? "";
+  const rest = normalized.slice(1);
+  const lowercased = `${firstChar.toLowerCase()}${rest}`;
+  return `Please ${lowercased}`;
 };
 
 const uniqueRoleIds = (roleIds: string[]): string[] => {
@@ -328,8 +338,9 @@ export const ensureHelpWantedMessage = async (
     return username;
   };
   const overrideUserNames = new Map<string, string>([
-    ["715692681883418755", "Sangaril"],
-    ["715699384687525950", "kiss of sprite"],
+    ["715692681883418755", "Leah"],
+    ["715699384687525950", "Eve"],
+    ["191938640413327360", "Mike"],
   ]);
   const payload = buildHelpWantedListComponents(
     requests,

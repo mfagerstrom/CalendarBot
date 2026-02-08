@@ -117,7 +117,7 @@ const buildArrangementQueueComponents = (
     const summary = occurrence.summary || "(No title)";
     const roleMentions = includeRoles ? formatRoleMentions(occurrence.roleIds) : "";
     const notes = includeNotes && occurrence.arrangementsNotes
-      ? ` | Notes: ${occurrence.arrangementsNotes}`
+      ? ` | Note: ${occurrence.arrangementsNotes}`
       : "";
     const rolesText = roleMentions ? ` | ${roleMentions}` : "";
     return `- **${summary}** | ${formatWhen(occurrence)}${rolesText}${notes}`;
@@ -127,7 +127,7 @@ const buildArrangementQueueComponents = (
   const completedLines = completed.map((occurrence) => formatLine(occurrence, false, true));
 
   container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent("## Arrangements Needed"),
+    new TextDisplayBuilder().setContent("## :warning: Arrangements Needed"),
   );
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
@@ -140,7 +140,7 @@ const buildArrangementQueueComponents = (
   );
 
   container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent("## Arrangements Set"),
+    new TextDisplayBuilder().setContent("## :white_check_mark: Arrangements Set"),
   );
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
