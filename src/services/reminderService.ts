@@ -25,6 +25,7 @@ export interface IReminderOccurrence {
   summary: string;
   reminderAt: Date;
   isAllDay?: boolean;
+  arrangementsNotes?: string | null;
   arrangementsRequired: boolean;
   completedAt?: Date | null;
   lastPromptAt?: Date | null;
@@ -33,9 +34,9 @@ export interface IReminderOccurrence {
 }
 
 const REMINDER_ACK_PREFIX = "reminder-ack";
-
 export const REMINDER_ACK_REGEX = /^reminder-ack:\d+$/;
 export const REMINDER_SNOOZE_REGEX = /^reminder-snooze:\d+$/;
+export const REMINDER_ARRANGEMENTS_REGEX = /^reminder-arrangements:\d+$/;
 
 const REMINDER_LOOKAHEAD_DAYS = 90;
 const REMINDER_TIMEZONE = "America/New_York";
@@ -69,6 +70,17 @@ const normalizeForMatch = (value: string): string => {
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
+};
+
+const normalizeArrangementNotes = (value: string | null | undefined): string => {
+  if (!value) return "";
+  return value.replace(/\s+/g, " ").trim();
+};
+
+const formatSummaryWithArrangements = (summary: string, arrangementsNotes?: string | null): string => {
+  const notes = normalizeArrangementNotes(arrangementsNotes);
+  if (!notes) return summary;
+  return `${summary} (${notes})`;
 };
 
 const makeDateInTimeZone = (
@@ -399,6 +411,11 @@ const hydrateOccurrences = async (rules: IReminderRule[]): Promise<void> => {
     );
 
     for (const dayYmd of iterateYmdRangeInclusive(startYmd, endInclusiveYmd)) {
+      const occurrenceStartForDay = buildOccurrenceStartForDay(
+        dayYmd,
+        isAllDay ? "UTC" : REMINDER_TIMEZONE,
+        timeParts,
+      );
       if (isAllDay) {
         const dayRange = getUtcDayRange(dayYmd);
         await query(
@@ -407,8 +424,10 @@ const hydrateOccurrences = async (rules: IReminderRule[]): Promise<void> => {
             WHERE calendar_id = :calendarId
               AND event_id = :eventId
               AND rule_id = :ruleId
+              AND completed_at IS NULL
               AND occurrence_start >= :dayStart
               AND occurrence_start < :dayEnd
+              AND occurrence_start != :occurrenceStart
           `,
           {
             calendarId: String(event.CALENDAR_ID),
@@ -416,15 +435,10 @@ const hydrateOccurrences = async (rules: IReminderRule[]): Promise<void> => {
             ruleId: match.id,
             dayStart: dayRange.start,
             dayEnd: dayRange.end,
+            occurrenceStart: occurrenceStartForDay,
           },
         );
       }
-
-      const occurrenceStartForDay = buildOccurrenceStartForDay(
-        dayYmd,
-        isAllDay ? "UTC" : REMINDER_TIMEZONE,
-        timeParts,
-      );
       const reminderAt = computeReminderAt(
         occurrenceStartForDay,
         isAllDay,
@@ -473,6 +487,7 @@ const fetchDueOccurrences = async (): Promise<IReminderOccurrence[]> => {
         occ.occurrence_end,
         occ.summary,
         occ.reminder_at,
+        occ.arrangements_notes,
         occ.arrangements_required,
         occ.completed_at,
         occ.last_prompt_at,
@@ -505,6 +520,7 @@ const fetchDueOccurrences = async (): Promise<IReminderOccurrence[]> => {
     summary: String(row.SUMMARY ?? ""),
     reminderAt: new Date(row.REMINDER_AT),
     isAllDay: Number(row.IS_ALL_DAY ?? 0) === 1,
+    arrangementsNotes: row.ARRANGEMENTS_NOTES ? String(row.ARRANGEMENTS_NOTES) : null,
     arrangementsRequired: Number(row.ARRANGEMENTS_REQUIRED ?? 0) === 1,
     completedAt: row.COMPLETED_AT ? new Date(row.COMPLETED_AT) : null,
     lastPromptAt: row.LAST_PROMPT_AT ? new Date(row.LAST_PROMPT_AT) : null,
@@ -513,11 +529,19 @@ const fetchDueOccurrences = async (): Promise<IReminderOccurrence[]> => {
   }));
 };
 
-const markPromptSent = async (occurrenceId: number, messageId: string): Promise<void> => {
+const markPromptSent = async (
+  occurrenceId: number,
+  messageId: string,
+  arrangementsRequired: boolean,
+): Promise<void> => {
+  const snoozeSql = arrangementsRequired
+    ? "snoozed_until = (CURRENT_TIMESTAMP + INTERVAL '1' DAY),"
+    : "snoozed_until = NULL,";
   await query(
     `
       UPDATE CALENDAR_ReminderOccurrences
       SET last_prompt_at = CURRENT_TIMESTAMP,
+          ${snoozeSql}
           prompt_message_id = :messageId,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = :id
@@ -555,6 +579,22 @@ export const completeOccurrence = async (occurrenceId: number): Promise<void> =>
   await markCompleted(occurrenceId);
 };
 
+export const completeOccurrenceWithArrangements = async (
+  occurrenceId: number,
+  arrangementsNotes: string,
+): Promise<void> => {
+  await query(
+    `
+      UPDATE CALENDAR_ReminderOccurrences
+      SET arrangements_notes = :arrangementsNotes,
+          completed_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = :id
+    `,
+    { id: occurrenceId, arrangementsNotes },
+  );
+};
+
 export const getOccurrenceById = async (
   occurrenceId: number,
 ): Promise<IReminderOccurrence | null> => {
@@ -569,6 +609,7 @@ export const getOccurrenceById = async (
         occ.occurrence_end,
         occ.summary,
         occ.reminder_at,
+        occ.arrangements_notes,
         occ.arrangements_required,
         occ.completed_at,
         occ.last_prompt_at,
@@ -596,6 +637,7 @@ export const getOccurrenceById = async (
     summary: String(row.SUMMARY ?? ""),
     reminderAt: new Date(row.REMINDER_AT),
     isAllDay: Number(row.IS_ALL_DAY ?? 0) === 1,
+    arrangementsNotes: row.ARRANGEMENTS_NOTES ? String(row.ARRANGEMENTS_NOTES) : null,
     arrangementsRequired: Number(row.ARRANGEMENTS_REQUIRED ?? 0) === 1,
     completedAt: row.COMPLETED_AT ? new Date(row.COMPLETED_AT) : null,
     lastPromptAt: row.LAST_PROMPT_AT ? new Date(row.LAST_PROMPT_AT) : null,
@@ -634,8 +676,13 @@ const buildPromptComponents = (
     ? `**When:** ${dateStr} (${timeStr})`
     : `**When:** ${dateStr} at ${timeStr}`;
 
+  const summaryLine = formatSummaryWithArrangements(
+    occurrence.summary || "(No title)",
+    occurrence.arrangementsNotes,
+  );
+
   const lines = [
-    `**Event:** ${occurrence.summary || "(No title)"}`,
+    `**Event:** ${summaryLine}`,
     whenLine,
     `**Reminder ID:** ${occurrence.id}`,
   ];
@@ -663,7 +710,7 @@ const buildPromptComponents = (
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`${REMINDER_ACK_PREFIX}:${occurrence.id}`)
-        .setLabel("Yes")
+        .setLabel("Arrangements Made")
         .setStyle(ButtonStyle.Success),
     );
 
@@ -703,8 +750,13 @@ export const buildConfirmedComponents = (
     ? `**When:** ${dateStr} (${timeStr})`
     : `**When:** ${dateStr} at ${timeStr}`;
 
+  const summaryLine = formatSummaryWithArrangements(
+    occurrence.summary || "(No title)",
+    occurrence.arrangementsNotes,
+  );
+
   const lines = [
-    `**Event:** ${occurrence.summary || "(No title)"}`,
+    `**Event:** ${summaryLine}`,
     whenLine,
     `**Reminder ID:** ${occurrence.id}`,
   ];
@@ -714,7 +766,12 @@ export const buildConfirmedComponents = (
     lines.push(roleMentions);
   }
 
-  lines.push("**Arrangements confirmed.**");
+  const arrangementsNotes = normalizeArrangementNotes(occurrence.arrangementsNotes);
+  if (arrangementsNotes) {
+    lines.push(`**Arrangements made:** ${arrangementsNotes}`);
+  } else {
+    lines.push("**Arrangements confirmed.**");
+  }
 
   const container = new ContainerBuilder();
   container.addTextDisplayComponents(
@@ -755,7 +812,7 @@ export const processReminders = async (client: Client): Promise<void> => {
       flags: MessageFlags.IsComponentsV2,
     });
 
-    await markPromptSent(occurrence.id, sent.id);
+    await markPromptSent(occurrence.id, sent.id, occurrence.arrangementsRequired);
 
     if (!occurrence.arrangementsRequired) {
       await markCompleted(occurrence.id);
