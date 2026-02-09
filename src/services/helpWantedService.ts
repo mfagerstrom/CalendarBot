@@ -18,6 +18,25 @@ export interface IHelpWantedRequest {
   createdAt?: Date | null;
 }
 
+interface IHelpWantedRequestRow {
+  ID: number | string;
+  REQUESTER_USER_ID: string | null;
+  REQUESTER_LABEL: string | null;
+  ROLE_IDS: string | null;
+  DESCRIPTION: string | null;
+  CREATED_AT: Date | string | null;
+}
+
+export interface IHelpWantedCompletion {
+  requestId: number;
+  requesterId: string;
+  requesterLabel?: string | null;
+  roleIds: string[];
+  requestDescription: string;
+  completedByUserId: string;
+  completionDescription: string;
+}
+
 const normalizeDescription = (value: string): string => {
   const normalized = value.replace(/\s+/g, " ").trim();
   if (!normalized) return normalized;
@@ -36,6 +55,14 @@ const uniqueRoleIds = (roleIds: string[]): string[] => {
   return Array.from(new Set(roleIds.map((id) => id.trim()).filter(Boolean)));
 };
 
+const mapHelpWantedRow = (row: IHelpWantedRequestRow): IHelpWantedRequest => ({
+  id: Number(row.ID),
+  requesterId: String(row.REQUESTER_USER_ID ?? ""),
+  requesterLabel: row.REQUESTER_LABEL ? String(row.REQUESTER_LABEL) : null,
+  roleIds: uniqueRoleIds(String(row.ROLE_IDS ?? "").split(",")),
+  description: String(row.DESCRIPTION ?? ""),
+  createdAt: row.CREATED_AT ? new Date(row.CREATED_AT) : null,
+});
 
 export const addHelpWantedRequest = async (
   requesterId: string,
@@ -75,7 +102,7 @@ export const addHelpWantedRequest = async (
 };
 
 export const listHelpWantedRequests = async (): Promise<IHelpWantedRequest[]> => {
-  const rows = await query<any>(
+  const rows = await query<IHelpWantedRequestRow>(
     `
       SELECT
         id,
@@ -89,14 +116,32 @@ export const listHelpWantedRequests = async (): Promise<IHelpWantedRequest[]> =>
     `,
   );
 
-  return rows.map((row) => ({
-    id: Number(row.ID),
-    requesterId: String(row.REQUESTER_USER_ID ?? ""),
-    requesterLabel: row.REQUESTER_LABEL ? String(row.REQUESTER_LABEL) : null,
-    roleIds: uniqueRoleIds(String(row.ROLE_IDS ?? "").split(",")),
-    description: String(row.DESCRIPTION ?? ""),
-    createdAt: row.CREATED_AT ? new Date(row.CREATED_AT) : null,
-  }));
+  return rows.map(mapHelpWantedRow);
+};
+
+export const getHelpWantedRequestById = async (
+  id: number,
+): Promise<IHelpWantedRequest | null> => {
+  const rows = await query<IHelpWantedRequestRow>(
+    `
+      SELECT
+        id,
+        requester_user_id,
+        requester_label,
+        role_ids,
+        description,
+        created_at
+      FROM CALENDAR_HelpWantedRequests
+      WHERE id = :id
+    `,
+    { id },
+  );
+
+  if (!rows.length) {
+    return null;
+  }
+
+  return mapHelpWantedRow(rows[0]);
 };
 
 export const removeHelpWantedRequest = async (id: number): Promise<void> => {
@@ -381,4 +426,47 @@ export const ensureHelpWantedMessage = async (
     flags: 1 << 15,
     allowedMentions,
   });
+};
+
+export const addHelpWantedCompletion = async (
+  completion: IHelpWantedCompletion,
+): Promise<void> => {
+  const normalizedCompletionDescription = completion.completionDescription
+    .replace(/\s+/g, " ")
+    .trim();
+
+  await query(
+    `
+      INSERT INTO CALENDAR_HelpWantedCompletions (
+        request_id,
+        requester_user_id,
+        requester_label,
+        role_ids,
+        request_description,
+        completed_by_user_id,
+        completion_description,
+        completed_at,
+        created_at
+      ) VALUES (
+        :requestId,
+        :requesterId,
+        :requesterLabel,
+        :roleIds,
+        :requestDescription,
+        :completedByUserId,
+        :completionDescription,
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP
+      )
+    `,
+    {
+      requestId: completion.requestId,
+      requesterId: completion.requesterId,
+      requesterLabel: completion.requesterLabel ?? null,
+      roleIds: uniqueRoleIds(completion.roleIds).join(","),
+      requestDescription: normalizeDescription(completion.requestDescription),
+      completedByUserId: completion.completedByUserId,
+      completionDescription: normalizedCompletionDescription,
+    },
+  );
 };

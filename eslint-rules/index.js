@@ -361,6 +361,21 @@ function getCalleePropertyName(node) {
   return null;
 }
 
+function isArrayFromSetCall(node) {
+  if (!node || node.type !== "CallExpression") return false;
+  if (node.callee.type !== "MemberExpression") return false;
+  if (node.callee.object.type !== "Identifier" || node.callee.object.name !== "Array") {
+    return false;
+  }
+  if (node.callee.property.type !== "Identifier" || node.callee.property.name !== "from") {
+    return false;
+  }
+  const [firstArg] = node.arguments;
+  if (!firstArg || firstArg.type !== "NewExpression") return false;
+  if (firstArg.callee.type !== "Identifier" || firstArg.callee.name !== "Set") return false;
+  return true;
+}
+
 export default {
   rules: {
     "no-djs-button-in-v2-accessory": {
@@ -486,6 +501,41 @@ export default {
             if (node.property.type !== "Identifier") return;
             if (node.property.name !== "fetchReply") return;
             context.report({ node: node.property, messageId: "deprecatedFetchReply" });
+          },
+        };
+      },
+    },
+    "no-duplicate-allowed-mentions-users": {
+      meta: {
+        type: "problem",
+        docs: {
+          description:
+            "Require deduped allowedMentions.users values to avoid Discord duplicate set errors.",
+        },
+        schema: [],
+        messages: {
+          dedupeUsers:
+            "allowedMentions.users should use a deduped array (for example Array.from(new Set([...]))).",
+        },
+      },
+      create(context) {
+        return {
+          Property(node) {
+            const keyName = getPropertyName(node.key);
+            if (keyName !== "allowedMentions") return;
+            if (!node.value || node.value.type !== "ObjectExpression") return;
+
+            const usersValue = getObjectPropertyValue(node.value, "users");
+            if (!usersValue) return;
+
+            if (usersValue.type === "ArrayExpression" && usersValue.elements.length > 1) {
+              context.report({ node: usersValue, messageId: "dedupeUsers" });
+              return;
+            }
+
+            if (isArrayFromSetCall(usersValue)) {
+              return;
+            }
           },
         };
       },
