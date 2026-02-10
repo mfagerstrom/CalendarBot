@@ -40,7 +40,7 @@ import {
   type AnyRepliable,
 } from "../../lib/discord/interactionUtils.js";
 import { buildSimpleTextContainer } from "../../services/eventUiService.js";
-import { requireModeratorOrAdminOrOwner, requireOwner } from "./todoPermissions.js";
+import { requireOwner } from "./todoPermissions.js";
 import { parseTodoPayloadToken, type TodoListPayload } from "./todoPayload.js";
 import { TODO_LABELS, type TodoLabel } from "./todoConstants.js";
 import { getGithubErrorMessage } from "./todoGithubErrors.js";
@@ -293,6 +293,9 @@ export class TodoViewInteractions {
       return;
     }
 
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
+
     const listModule = await import("./TodoList.js");
     await listModule.renderTodoListPage(interaction, parsed.payloadToken, parsed.page);
   }
@@ -426,7 +429,7 @@ export class TodoViewInteractions {
       return;
     }
 
-    const ok = await requireModeratorOrAdminOrOwner(interaction);
+    const ok = await requireOwner(interaction);
     if (!ok) return;
 
     let issue: IGithubIssue | null;
@@ -493,7 +496,7 @@ export class TodoViewInteractions {
       return;
     }
 
-    const ok = await requireModeratorOrAdminOrOwner(interaction);
+    const ok = await requireOwner(interaction);
     if (!ok) return;
 
     const labels = interaction.values.filter((label) =>
@@ -563,6 +566,9 @@ export class TodoViewInteractions {
       return;
     }
 
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
+
     const modal = buildTodoCommentModal(
       parsed.payloadToken,
       parsed.page,
@@ -584,6 +590,9 @@ export class TodoViewInteractions {
       });
       return;
     }
+
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
 
     await safeDeferReply(interaction, { flags: buildComponentsV2Flags(true) });
 

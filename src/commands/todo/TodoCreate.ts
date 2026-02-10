@@ -26,7 +26,7 @@ import {
 } from "../../services/todoSessionService.js";
 import { buildComponentsV2Flags, safeReply, safeUpdate } from "../../lib/discord/interactionUtils.js";
 import { buildSimpleTextContainer } from "../../services/eventUiService.js";
-import { requireModeratorOrAdminOrOwner } from "./todoPermissions.js";
+import { requireOwner } from "./todoPermissions.js";
 import { MAX_ISSUE_BODY, sanitizeTodoRichText } from "./todoTextUtils.js";
 import { TODO_LABELS, type TodoLabel } from "./todoConstants.js";
 import { getGithubErrorMessage } from "./todoGithubErrors.js";
@@ -163,7 +163,7 @@ export class TodoCreateInteractions {
       return;
     }
 
-    const ok = await requireModeratorOrAdminOrOwner(interaction);
+    const ok = await requireOwner(interaction);
     if (!ok) return;
 
     const rawTitle = interaction.fields.getTextInputValue(TODO_CREATE_TITLE_ID);
@@ -225,6 +225,9 @@ export class TodoCreateInteractions {
       return;
     }
 
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
+
     const session = await getTodoCreateSession(parsed.sessionId);
     if (!session || session.userId !== interaction.user.id) {
       await safeUpdate(interaction, {
@@ -277,7 +280,7 @@ export class TodoCreateInteractions {
       return;
     }
 
-    const ok = await requireModeratorOrAdminOrOwner(interaction);
+    const ok = await requireOwner(interaction);
     if (!ok) return;
 
     try {
@@ -353,6 +356,9 @@ export class TodoCreateInteractions {
       });
       return;
     }
+
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
 
     await deleteTodoCreateSession(parsed.sessionId);
     try {

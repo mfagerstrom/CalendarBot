@@ -72,7 +72,7 @@ import {
 import { formatIssueLink, formatIssueSelectLabel } from "./todoTextUtils.js";
 import { buildIssueViewComponents } from "./TodoView.js";
 import { buildTodoCreateModal } from "./TodoCreate.js";
-import { requireModeratorOrAdminOrOwner, requireOwner } from "./todoPermissions.js";
+import { requireOwner } from "./todoPermissions.js";
 import { getGithubErrorMessage } from "./todoGithubErrors.js";
 
 const ISSUE_LIST_TITLE = "GitHub Issues";
@@ -476,6 +476,9 @@ export class TodoCommand {
       return;
     }
 
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
+
     const isPublic = showInChat !== false;
     await safeDeferReply(interaction, { flags: buildComponentsV2Flags(!isPublic) });
 
@@ -572,6 +575,9 @@ export class TodoListInteractions {
       await replyTodoExpired(interaction);
       return;
     }
+
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
     await renderTodoListPage(interaction, parsed.payloadToken, parsed.page);
   }
 
@@ -582,6 +588,9 @@ export class TodoListInteractions {
       await replyTodoExpired(interaction);
       return;
     }
+
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
 
     let issue: IGithubIssue | null;
     let comments: IGithubIssueComment[] = [];
@@ -628,6 +637,9 @@ export class TodoListInteractions {
       return;
     }
 
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
+
     const basePayload = parseTodoPayloadToken(parsed.payloadToken);
     if (!basePayload) {
       await replyTodoExpired(interaction);
@@ -653,7 +665,7 @@ export class TodoListInteractions {
       return;
     }
 
-    const ok = await requireModeratorOrAdminOrOwner(interaction);
+    const ok = await requireOwner(interaction);
     if (!ok) return;
 
     const modal = buildTodoCreateModal(parsed.payloadToken, parsed.page);
@@ -730,6 +742,9 @@ export class TodoListInteractions {
       return;
     }
 
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
+
     await safeUpdate(interaction, {
       components: [buildSimpleTextContainer("Close issue cancelled.")],
       flags: buildComponentsV2Flags(true),
@@ -800,6 +815,9 @@ export class TodoListInteractions {
       return;
     }
 
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
+
     const basePayload = parseTodoPayloadToken(parsed.payloadToken);
     if (!basePayload) {
       await replyTodoExpired(interaction);
@@ -823,6 +841,9 @@ export class TodoListInteractions {
       await replyTodoExpired(interaction, "This query prompt expired.");
       return;
     }
+
+    const ok = await requireOwner(interaction);
+    if (!ok) return;
 
     await safeDeferReply(interaction, { flags: buildComponentsV2Flags(true) });
 
