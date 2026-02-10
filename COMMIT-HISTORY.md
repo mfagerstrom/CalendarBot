@@ -1,5 +1,7 @@
 # Commit History
 Last synced: 2026-02-10 (session sync)
+- 2026-02-10: f6c96e0 fix: todo security changes
+- 2026-02-10: 6bee7bf fixes for arrangements needed static post
 - 2026-02-09: 66ecb3c added help completion messages so people know things have been done
 - 2026-02-08: a4f8b3b fix: tweaks
 - 2026-02-08: 6c2ec5e time zone fixes

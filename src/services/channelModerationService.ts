@@ -5,6 +5,7 @@ import { CHANNELS } from "../config/channels.js";
 const RESTRICTED_CHANNEL_IDS = new Set<string>([
     CHANNELS.TODAY,
     CHANNELS.THIS_WEEK,
+    CHANNELS.GROCERY_LIST,
 ]);
 
 const NO_CHAT_DM_REMINDER = [

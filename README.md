@@ -6,6 +6,7 @@ CalendarBot is a private Discord bot for my family of six to coordinate calendar
 - Connects each family member's Google Calendar via OAuth
 - Syncs calendar changes on a 5 minute loop
 - Updates static Discord posts in the Today and This Week channels whenever events change or the day rolls over
+- Syncs a static Grocery List post from Todoist
 - Uses Discord Components v2 for all bot output
 
 ## User Commands
@@ -25,6 +26,9 @@ PORT=3000
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_REDIRECT_URI=http://localhost:3000/oauth2callback
+TODOIST_API_TOKEN=
+TODOIST_GROCERY_PROJECT_ID=
+TODOIST_GROCERY_PROJECT_NAME=Family Shopping List
 ORACLE_USER=
 ORACLE_PASSWORD=
 ORACLE_CONNECT_STRING=
@@ -35,6 +39,8 @@ GITHUB_APP_ID=
 GITHUB_APP_INSTALLATION_ID=
 GITHUB_APP_PRIVATE_KEY=
 ```
+
+5. Create a shared Todoist project for groceries and add all collaborators there.
 
 ## Development
 ```bash

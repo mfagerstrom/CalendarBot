@@ -11,6 +11,7 @@ import { Client } from "discordx";
 import { processReminders, refreshActiveReminderMessages } from "./reminderService.js";
 import { ensureHelpWantedMessage } from "./helpWantedService.js";
 import { ensureArrangementQueueMessage } from "./arrangementQueueService.js";
+import { startGroceryListSyncService } from "./groceryListService.js";
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 let lastCheckedDate = new Date().toDateString();
@@ -91,6 +92,7 @@ export const startCalendarSyncService = (client: Client) => {
         try {
             await ensureArrangementQueueMessage(client, CHANNELS.ARRANGEMENTS_QUEUE);
             await refreshActiveReminderMessages(client);
+            startGroceryListSyncService(client, CHANNELS.GROCERY_LIST);
         } catch (err) {
             console.error("Failed to run startup refresh tasks:", err);
         }
