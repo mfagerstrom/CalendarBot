@@ -116,7 +116,8 @@ export const formatDiscordTimestamp = (value: string | null | undefined): string
   if (!value) return "Unknown";
   const ms = Date.parse(value);
   if (Number.isNaN(ms)) return "Unknown";
-  return `<t:${Math.floor(ms / 1000)}:f>`;
+  const adjustedMs = ms + 5 * 60 * 60 * 1000;
+  return `<t:${Math.floor(adjustedMs / 1000)}:f>`;
 };
 
 export const formatIssueLink = (issue: IGithubIssue): string => {

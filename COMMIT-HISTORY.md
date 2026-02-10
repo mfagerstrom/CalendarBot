@@ -1,5 +1,6 @@
 # Commit History
-Last synced: 2026-02-09 (session sync)
+Last synced: 2026-02-10 (session sync)
+- 2026-02-09: 66ecb3c added help completion messages so people know things have been done
 - 2026-02-08: a4f8b3b fix: tweaks
 - 2026-02-08: 6c2ec5e time zone fixes
 - 2026-02-08: 96e08c4 fix: improvements to calendar reminders and arrangement handling

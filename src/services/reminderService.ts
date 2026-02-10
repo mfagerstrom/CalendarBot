@@ -85,6 +85,7 @@ const formatSummaryForReminder = (summary: string): string => {
 };
 
 const toUnixTimestamp = (value: Date): number => Math.floor(value.getTime() / 1000);
+const addHours = (value: Date, hours: number): Date => new Date(value.getTime() + hours * 60 * 60 * 1000);
 
 const makeDateInTimeZone = (
   year: number,
@@ -115,11 +116,11 @@ const formatDiscordDateWithRelative = (occurrence: IReminderOccurrence): string 
       0,
       REMINDER_TIMEZONE,
     );
-    const unix = toUnixTimestamp(localMidnight);
+    const unix = toUnixTimestamp(addHours(localMidnight, 5));
     return `<t:${unix}:F> (<t:${unix}:R>)`;
   }
 
-  const unix = toUnixTimestamp(occurrence.occurrenceStart);
+  const unix = toUnixTimestamp(addHours(occurrence.occurrenceStart, 5));
   return `<t:${unix}:F> (<t:${unix}:R>)`;
 };
 
@@ -307,13 +308,15 @@ const insertOccurrenceIfMissing = async (
   occurrenceStart: Date,
   occurrenceEnd: Date | null,
   reminderAt: Date,
-  isAllDay: boolean,
 ): Promise<void> => {
   const rows = await query<any>(
     `
       SELECT
         id,
+        summary,
+        occurrence_end,
         reminder_at,
+        arrangements_required,
         completed_at
       FROM CALENDAR_ReminderOccurrences
       WHERE rule_id = :ruleId
@@ -330,19 +333,34 @@ const insertOccurrenceIfMissing = async (
   );
 
   if (rows.length > 0) {
-    if (!isAllDay) return;
     const row = rows[0];
-    if (row.COMPLETED_AT) return;
     const existingReminderAt = row.REMINDER_AT ? new Date(row.REMINDER_AT) : null;
-    if (!existingReminderAt || existingReminderAt.getTime() !== reminderAt.getTime()) {
+    const existingEnd = row.OCCURRENCE_END ? new Date(row.OCCURRENCE_END) : null;
+    const existingSummary = String(row.SUMMARY ?? "");
+    const existingArrangementsRequired = Number(row.ARRANGEMENTS_REQUIRED ?? 0) === 1;
+    const endChanged = (existingEnd?.getTime() ?? 0) !== (occurrenceEnd?.getTime() ?? 0);
+    const reminderChanged = !existingReminderAt || existingReminderAt.getTime() !== reminderAt.getTime();
+    const summaryChanged = existingSummary !== summary;
+    const arrangementsChanged = existingArrangementsRequired !== rule.arrangementsRequired;
+
+    if (endChanged || reminderChanged || summaryChanged || arrangementsChanged) {
       await query(
         `
           UPDATE CALENDAR_ReminderOccurrences
-          SET reminder_at = :reminderAt,
+          SET summary = :summary,
+              occurrence_end = :occurrenceEnd,
+              reminder_at = :reminderAt,
+              arrangements_required = :arrangementsRequired,
               updated_at = CURRENT_TIMESTAMP
           WHERE id = :id
         `,
-        { id: Number(row.ID), reminderAt },
+        {
+          id: Number(row.ID),
+          summary,
+          occurrenceEnd,
+          reminderAt,
+          arrangementsRequired: rule.arrangementsRequired ? 1 : 0,
+        },
       );
     }
     return;
@@ -384,6 +402,47 @@ const insertOccurrenceIfMissing = async (
       reminderAt,
       arrangementsRequired: rule.arrangementsRequired ? 1 : 0,
     },
+  );
+};
+
+const deleteOutdatedOccurrences = async (
+  calendarId: string,
+  eventId: string,
+  ruleId: number,
+  occurrenceStarts: Date[],
+): Promise<void> => {
+  if (occurrenceStarts.length === 0) {
+    await query(
+      `
+        DELETE FROM CALENDAR_ReminderOccurrences
+        WHERE calendar_id = :calendarId
+          AND event_id = :eventId
+          AND rule_id = :ruleId
+      `,
+      { calendarId, eventId, ruleId },
+    );
+    return;
+  }
+
+  const bindNames = occurrenceStarts.map((_, index) => `:start${index}`);
+  const binds: Record<string, Date | string | number> = {
+    calendarId,
+    eventId,
+    ruleId,
+  };
+  occurrenceStarts.forEach((start, index) => {
+    binds[`start${index}`] = start;
+  });
+
+  await query(
+    `
+      DELETE FROM CALENDAR_ReminderOccurrences
+      WHERE calendar_id = :calendarId
+        AND event_id = :eventId
+        AND rule_id = :ruleId
+        AND occurrence_start NOT IN (${bindNames.join(", ")})
+    `,
+    binds,
   );
 };
 
@@ -432,6 +491,7 @@ const hydrateOccurrences = async (rules: IReminderRule[]): Promise<void> => {
       occurrenceStart,
       REMINDER_TIMEZONE,
     );
+    const occurrenceStarts: Date[] = [];
 
     for (const dayYmd of iterateYmdRangeInclusive(startYmd, endInclusiveYmd)) {
       const occurrenceStartForDay = buildOccurrenceStartForDay(
@@ -439,6 +499,7 @@ const hydrateOccurrences = async (rules: IReminderRule[]): Promise<void> => {
         isAllDay ? "UTC" : REMINDER_TIMEZONE,
         timeParts,
       );
+      occurrenceStarts.push(occurrenceStartForDay);
       if (isAllDay) {
         const dayRange = getUtcDayRange(dayYmd);
         await query(
@@ -492,9 +553,15 @@ const hydrateOccurrences = async (rules: IReminderRule[]): Promise<void> => {
         occurrenceStartForDay,
         occurrenceEnd,
         reminderAt,
-        isAllDay,
       );
     }
+
+    await deleteOutdatedOccurrences(
+      String(event.CALENDAR_ID),
+      String(event.EVENT_ID),
+      match.id,
+      occurrenceStarts,
+    );
   }
 };
 

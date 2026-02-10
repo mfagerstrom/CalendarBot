@@ -50,6 +50,7 @@ const formatRoleMentions = (roleIds: string[]): string => {
 };
 
 const toUnixTimestamp = (value: Date): number => Math.floor(value.getTime() / 1000);
+const addHours = (value: Date, hours: number): Date => new Date(value.getTime() + hours * 60 * 60 * 1000);
 
 const makeDateInTimeZone = (
   year: number,
@@ -81,22 +82,22 @@ const formatWhen = (occurrence: IArrangementQueueOccurrence): string => {
     0,
     REMINDER_TIMEZONE,
   );
-  const unix = toUnixTimestamp(localMidnight);
+  const unix = toUnixTimestamp(addHours(localMidnight, 5));
   return `<t:${unix}:D> (<t:${unix}:R>)`;
 };
 
 const buildArrangementQueueComponents = (
   occurrences: IArrangementQueueOccurrence[],
-): Array<ContainerBuilder | ActionRowBuilder<StringSelectMenuBuilder>> => {
-  const container = new ContainerBuilder();
-  container.addTextDisplayComponents(
+): Array<ContainerBuilder> => {
+  const containerNeeded = new ContainerBuilder();
+  containerNeeded.addTextDisplayComponents(
     new TextDisplayBuilder().setContent("# Upcoming Events Requiring Arrangements"),
   );
-  container.addSeparatorComponents(
+  containerNeeded.addSeparatorComponents(
     new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(false),
   );
 
-  container.addTextDisplayComponents(
+  containerNeeded.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
       `Read-only queue. Shows all arrangement reminders for events that have not passed yet. Pings start ${ARRANGEMENT_PING_WINDOW_DAYS} days before an event when arrangements are still pending.`,
     ),
@@ -105,7 +106,7 @@ const buildArrangementQueueComponents = (
   const pending = occurrences.filter((occurrence) => !occurrence.completedAt);
   const completed = occurrences.filter((occurrence) => occurrence.completedAt);
 
-  container.addSeparatorComponents(
+  containerNeeded.addSeparatorComponents(
     new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(false),
   );
 
@@ -126,30 +127,14 @@ const buildArrangementQueueComponents = (
   const pendingLines = pending.map((occurrence) => formatLine(occurrence, true, true));
   const completedLines = completed.map((occurrence) => formatLine(occurrence, false, true));
 
-  container.addTextDisplayComponents(
+  containerNeeded.addTextDisplayComponents(
     new TextDisplayBuilder().setContent("## :warning: Arrangements Needed"),
   );
-  container.addTextDisplayComponents(
+  containerNeeded.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
       pendingLines.length ? pendingLines.join("\n") : "No upcoming events need arrangements.",
     ),
   );
-
-  container.addSeparatorComponents(
-    new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(false),
-  );
-
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent("## :white_check_mark: Arrangements Set"),
-  );
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      completedLines.length ? completedLines.join("\n") : "No upcoming events have arrangements set.",
-    ),
-  );
-  const components: Array<ContainerBuilder | ActionRowBuilder<StringSelectMenuBuilder>> = [
-    container,
-  ];
 
   if (pending.length > 0) {
     const options = pending.slice(0, MAX_QUEUE_OPTIONS).map((occurrence) => {
@@ -176,12 +161,29 @@ const buildArrangementQueueComponents = (
         .setMaxValues(1)
         .addOptions(options);
 
-      components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(completeSelect));
-      components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(notesSelect));
+      containerNeeded.addSeparatorComponents(
+        new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(false),
+      );
+      containerNeeded.addActionRowComponents(
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(completeSelect),
+      );
+      containerNeeded.addActionRowComponents(
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(notesSelect),
+      );
     }
   }
 
-  return components;
+  const containerSet = new ContainerBuilder();
+  containerSet.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent("## :white_check_mark: Arrangements Set"),
+  );
+  containerSet.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      completedLines.length ? completedLines.join("\n") : "No upcoming events have arrangements set.",
+    ),
+  );
+
+  return [containerNeeded, containerSet];
 };
 
 const listUpcomingArrangementOccurrences = async (): Promise<IArrangementQueueOccurrence[]> => {
