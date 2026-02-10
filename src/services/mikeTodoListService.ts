@@ -21,9 +21,12 @@ interface ITodoistSection {
 }
 
 interface ITodoistTask {
+  id?: string | number;
   content?: string;
   created_at?: string;
   creator_id?: string | number;
+  parent_id?: string | number | null;
+  order?: number;
   due?: {
     date?: string;
     datetime?: string;
@@ -52,6 +55,14 @@ interface IMikeTodoListData {
   sourceUpdatedBy?: string;
 }
 
+interface IPreparedTodoTask {
+  dueLabel: string;
+  id: string;
+  text: string;
+  order: number;
+  parentId: string;
+}
+
 let todoTimer: NodeJS.Timeout | null = null;
 let todoSyncInProgress = false;
 let lastPayloadFingerprint = "";
@@ -74,49 +85,39 @@ const formatTimestampEt = (date: Date): string => {
   return `${text} ET`;
 };
 
-const formatTimeInEt = (date: Date): string => {
-  return new Intl.DateTimeFormat("en-US", {
+const formatMonthDayFromYmd = (ymd: string): string => {
+  const match = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return ymd;
+  }
+  return `${match[2]}/${match[3]}`;
+};
+
+const formatMonthDayTimeInEt = (date: Date): string => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    month: "2-digit",
+    day: "2-digit",
     hour: "numeric",
     minute: "2-digit",
     timeZone: REMINDER_TIMEZONE,
-  }).format(date);
-};
+  }).formatToParts(date);
 
-const formatWeekdayDateInEt = (date: Date): string => {
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "long",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: REMINDER_TIMEZONE,
-  }).format(date);
+  const month = parts.find((part) => part.type === "month")?.value ?? "";
+  const day = parts.find((part) => part.type === "day")?.value ?? "";
+  const hour = parts.find((part) => part.type === "hour")?.value ?? "";
+  const minute = parts.find((part) => part.type === "minute")?.value ?? "";
+  const dayPeriod = parts.find((part) => part.type === "dayPeriod")?.value.toLowerCase() ?? "";
+  return `${month}/${day} ${hour}:${minute}${dayPeriod}`.trim();
 };
 
 const formatTaskDueLabel = (task: ITodoistTask): string => {
-  const now = new Date();
-  const todayYmd = formatYmdInTimezone(now, REMINDER_TIMEZONE);
-  const tomorrow = new Date(now.getTime());
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowYmd = formatYmdInTimezone(tomorrow, REMINDER_TIMEZONE);
-
   const dueDateTime = String(task.due?.datetime ?? "");
   const dueDate = String(task.due?.date ?? "");
 
   if (dueDateTime) {
     const parsed = new Date(dueDateTime);
     if (!Number.isNaN(parsed.getTime())) {
-      const dueYmd = formatYmdInTimezone(parsed, REMINDER_TIMEZONE);
-      const dueTime = formatTimeInEt(parsed);
-
-      if (dueYmd === todayYmd) {
-        return dueTime;
-      }
-
-      if (dueYmd === tomorrowYmd) {
-        return `Tomorrow ${dueTime}`;
-      }
-
-      return `${formatWeekdayDateInEt(parsed)} ${dueTime}`;
+      return formatMonthDayTimeInEt(parsed);
     }
   }
 
@@ -124,20 +125,7 @@ const formatTaskDueLabel = (task: ITodoistTask): string => {
     return "";
   }
 
-  if (dueDate === todayYmd) {
-    return "Today";
-  }
-
-  if (dueDate === tomorrowYmd) {
-    return "Tomorrow";
-  }
-
-  const parsedDate = new Date(`${dueDate}T00:00:00`);
-  if (Number.isNaN(parsedDate.getTime())) {
-    return dueDate;
-  }
-
-  return formatWeekdayDateInEt(parsedDate);
+  return formatMonthDayFromYmd(dueDate);
 };
 
 const formatYmdInTimezone = (date: Date, timezone: string): string => {
@@ -288,6 +276,84 @@ const getOrCreateSection = (
   return created;
 };
 
+const sortPreparedTasks = (a: IPreparedTodoTask, b: IPreparedTodoTask): number => {
+  const aHasDue = a.dueLabel.length > 0;
+  const bHasDue = b.dueLabel.length > 0;
+  if (aHasDue !== bHasDue) {
+    return aHasDue ? -1 : 1;
+  }
+  return a.order - b.order || a.text.localeCompare(b.text);
+};
+
+const buildSectionTaskLines = (tasks: IPreparedTodoTask[]): string[] => {
+  if (!tasks.length) {
+    return [];
+  }
+
+  const byId = new Map<string, IPreparedTodoTask>();
+  const childMap = new Map<string, IPreparedTodoTask[]>();
+  const roots: IPreparedTodoTask[] = [];
+
+  for (const task of tasks) {
+    byId.set(task.id, task);
+  }
+
+  for (const task of tasks) {
+    if (task.parentId && byId.has(task.parentId)) {
+      const children = childMap.get(task.parentId) ?? [];
+      children.push(task);
+      childMap.set(task.parentId, children);
+      continue;
+    }
+    roots.push(task);
+  }
+
+  roots.sort(sortPreparedTasks);
+  for (const children of childMap.values()) {
+    children.sort(sortPreparedTasks);
+  }
+
+  const dueLabelWidth = tasks.reduce((maxWidth, task) => {
+    return Math.max(maxWidth, task.dueLabel.length);
+  }, 0);
+
+  const formatTaskLine = (task: IPreparedTodoTask, depth: number): string => {
+    if (depth > 0 || dueLabelWidth <= 0 || !task.dueLabel) {
+      return task.text;
+    }
+    const paddedDueLabel = task.dueLabel.padEnd(dueLabelWidth, " ");
+    return `\`${paddedDueLabel}\` ${task.text}`;
+  };
+
+  const lines: string[] = [];
+  const visited = new Set<string>();
+
+  const walk = (task: IPreparedTodoTask, depth: number): void => {
+    if (visited.has(task.id)) {
+      return;
+    }
+    visited.add(task.id);
+
+    lines.push(`${"  ".repeat(depth)}- ${formatTaskLine(task, depth)}`);
+    const children = childMap.get(task.id) ?? [];
+    for (const child of children) {
+      walk(child, depth + 1);
+    }
+  };
+
+  for (const root of roots) {
+    walk(root, 0);
+  }
+
+  for (const task of tasks.sort(sortPreparedTasks)) {
+    if (!visited.has(task.id)) {
+      walk(task, 0);
+    }
+  }
+
+  return lines;
+};
+
 const buildTodoListData = (
   project: ITodoistProject,
   sections: ITodoistSection[],
@@ -295,6 +361,7 @@ const buildTodoListData = (
   collaborators: ITodoistCollaborator[],
 ): IMikeTodoListData => {
   const sectionMap = new Map<string, ISectionSnapshot>();
+  const preparedBySection = new Map<string, IPreparedTodoTask[]>();
   const collaboratorNames = new Map<string, string>();
   const rootSectionId = "root";
   const rootSectionName = "General";
@@ -339,23 +406,34 @@ const buildTodoListData = (
       continue;
     }
     const dueLabel = formatTaskDueLabel(task);
-    const displayText = dueLabel
-      ? `${text}\n-# ⠀⠀Due ${dueLabel}`
-      : text;
     const sectionId = task.section_id ? String(task.section_id) : rootSectionId;
-    const section = getOrCreateSection(
-      sectionMap,
-      sectionId,
-      rootSectionName,
-      Number.MAX_SAFE_INTEGER,
-    );
-    section.neededItems.push(displayText);
+    getOrCreateSection(sectionMap, sectionId, rootSectionName, Number.MAX_SAFE_INTEGER);
+
+    const preparedTasks = preparedBySection.get(sectionId) ?? [];
+    preparedTasks.push({
+      dueLabel,
+      id: String(task.id ?? `${sectionId}:${preparedTasks.length}:${text}`),
+      text,
+      order: Number(task.order ?? Number.MAX_SAFE_INTEGER),
+      parentId: String(task.parent_id ?? ""),
+    });
+    preparedBySection.set(sectionId, preparedTasks);
 
     const createdAt = String(task.created_at ?? "");
     if (createdAt && createdAt > sourceUpdatedAt) {
       sourceUpdatedAt = createdAt;
       sourceUpdatedById = String(task.creator_id ?? "");
     }
+  }
+
+  for (const [sectionId, tasks] of preparedBySection) {
+    const section = getOrCreateSection(
+      sectionMap,
+      sectionId,
+      rootSectionName,
+      Number.MAX_SAFE_INTEGER,
+    );
+    section.neededItems = buildSectionTaskLines(tasks);
   }
 
   const orderedSections = Array.from(sectionMap.values())
@@ -409,7 +487,7 @@ const buildSectionContainer = (section: ISectionSnapshot): ContainerBuilder => {
   const lines: string[] = [`## ${sectionEmoji}⠀${section.name}`];
   lines.push(
     section.neededItems.length > 0
-      ? section.neededItems.map((item) => `- ${item}`).join("\n")
+      ? section.neededItems.join("\n")
       : "- none",
   );
   if (section.completedItems.length > 0) {
