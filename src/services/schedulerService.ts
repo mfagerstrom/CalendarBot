@@ -12,6 +12,7 @@ import { processReminders, refreshActiveReminderMessages } from "./reminderServi
 import { ensureHelpWantedMessage } from "./helpWantedService.js";
 import { ensureArrangementQueueMessage } from "./arrangementQueueService.js";
 import { startGroceryListSyncService } from "./groceryListService.js";
+import { startMikeTodoListSyncService } from "./mikeTodoListService.js";
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 let lastCheckedDate = new Date().toDateString();
@@ -93,6 +94,7 @@ export const startCalendarSyncService = (client: Client) => {
             await ensureArrangementQueueMessage(client, CHANNELS.ARRANGEMENTS_QUEUE);
             await refreshActiveReminderMessages(client);
             startGroceryListSyncService(client, CHANNELS.GROCERY_LIST);
+            startMikeTodoListSyncService(client, CHANNELS.TODO_LIST);
         } catch (err) {
             console.error("Failed to run startup refresh tasks:", err);
         }

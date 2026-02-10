@@ -1,17 +1,13 @@
 import axios from "axios";
-import {
-  ContainerBuilder,
-  TextDisplayBuilder,
-} from "@discordjs/builders";
+import { ContainerBuilder, TextDisplayBuilder } from "@discordjs/builders";
 import { MessageFlags } from "discord.js";
 import type { Client } from "discordx";
 import { TODOIST_CONFIG } from "../config/todoist.js";
 import { query } from "../lib/db/oracle.js";
 
 const REMINDER_TIMEZONE = "America/New_York";
-const GROCERY_SYNC_INTERVAL_MS = 60 * 1000;
+const TODO_SYNC_INTERVAL_MS = 60 * 1000;
 const TODOIST_API_BASE_URL = "https://api.todoist.com";
-const TODOIST_COMPLETED_LIMIT = 200;
 
 interface ITodoistProject {
   id: string;
@@ -28,21 +24,12 @@ interface ITodoistTask {
   content?: string;
   created_at?: string;
   creator_id?: string | number;
-  id: string;
-  is_completed?: boolean;
+  due?: {
+    date?: string;
+    datetime?: string;
+    is_recurring?: boolean;
+  };
   section_id?: string;
-}
-
-interface ITodoistCompletedItem {
-  completed_at?: string;
-  completed_by_id?: string | number;
-  completed_by_uid?: string | number;
-  content?: string;
-  section_id?: string;
-}
-
-interface ITodoistCompletedResponse {
-  items?: ITodoistCompletedItem[];
 }
 
 interface ITodoistCollaborator {
@@ -50,19 +37,14 @@ interface ITodoistCollaborator {
   name?: string;
 }
 
-interface ICompletedItemSnapshot {
-  completedAt?: string;
-  text: string;
-}
-
 interface ISectionSnapshot {
-  completedItems: ICompletedItemSnapshot[];
+  completedItems: string[];
   name: string;
   neededItems: string[];
   order: number;
 }
 
-interface IGroceryListData {
+interface IMikeTodoListData {
   listId: string;
   listTitle: string;
   sections: ISectionSnapshot[];
@@ -70,10 +52,9 @@ interface IGroceryListData {
   sourceUpdatedBy?: string;
 }
 
-let groceryTimer: NodeJS.Timeout | null = null;
-let grocerySyncInProgress = false;
+let todoTimer: NodeJS.Timeout | null = null;
+let todoSyncInProgress = false;
 let lastPayloadFingerprint = "";
-let cachedProjectId = TODOIST_CONFIG.groceryProjectId;
 
 const todoistClient = axios.create({
   baseURL: TODOIST_API_BASE_URL,
@@ -93,18 +74,116 @@ const formatTimestampEt = (date: Date): string => {
   return `${text} ET`;
 };
 
-const isCompletedWithinOneDay = (completedAtRaw?: string): boolean => {
-  if (!completedAtRaw) {
-    return false;
+const formatTimeInEt = (date: Date): string => {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: REMINDER_TIMEZONE,
+  }).format(date);
+};
+
+const formatWeekdayDateInEt = (date: Date): string => {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: REMINDER_TIMEZONE,
+  }).format(date);
+};
+
+const formatTaskDueLabel = (task: ITodoistTask): string => {
+  const now = new Date();
+  const todayYmd = formatYmdInTimezone(now, REMINDER_TIMEZONE);
+  const tomorrow = new Date(now.getTime());
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowYmd = formatYmdInTimezone(tomorrow, REMINDER_TIMEZONE);
+
+  const dueDateTime = String(task.due?.datetime ?? "");
+  const dueDate = String(task.due?.date ?? "");
+
+  if (dueDateTime) {
+    const parsed = new Date(dueDateTime);
+    if (!Number.isNaN(parsed.getTime())) {
+      const dueYmd = formatYmdInTimezone(parsed, REMINDER_TIMEZONE);
+      const dueTime = formatTimeInEt(parsed);
+
+      if (dueYmd === todayYmd) {
+        return dueTime;
+      }
+
+      if (dueYmd === tomorrowYmd) {
+        return `Tomorrow ${dueTime}`;
+      }
+
+      return `${formatWeekdayDateInEt(parsed)} ${dueTime}`;
+    }
   }
 
-  const completedAt = new Date(completedAtRaw);
-  if (Number.isNaN(completedAt.getTime())) {
-    return false;
+  if (!dueDate) {
+    return "";
   }
 
-  const ageMs = Date.now() - completedAt.getTime();
-  return ageMs >= 0 && ageMs <= 24 * 60 * 60 * 1000;
+  if (dueDate === todayYmd) {
+    return "Today";
+  }
+
+  if (dueDate === tomorrowYmd) {
+    return "Tomorrow";
+  }
+
+  const parsedDate = new Date(`${dueDate}T00:00:00`);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return dueDate;
+  }
+
+  return formatWeekdayDateInEt(parsedDate);
+};
+
+const formatYmdInTimezone = (date: Date, timezone: string): string => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value ?? "";
+  const month = parts.find((part) => part.type === "month")?.value ?? "";
+  const day = parts.find((part) => part.type === "day")?.value ?? "";
+  return `${year}-${month}-${day}`;
+};
+
+const getDueYmd = (task: ITodoistTask): string => {
+  const dueDate = String(task.due?.date ?? "");
+  if (dueDate) {
+    return dueDate;
+  }
+
+  const dueDateTime = String(task.due?.datetime ?? "");
+  if (!dueDateTime) {
+    return "";
+  }
+
+  const parsed = new Date(dueDateTime);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  return formatYmdInTimezone(parsed, REMINDER_TIMEZONE);
+};
+
+const shouldRenderTask = (task: ITodoistTask): boolean => {
+  const todayYmd = formatYmdInTimezone(new Date(), REMINDER_TIMEZONE);
+  const dueYmd = getDueYmd(task);
+  if (!dueYmd) {
+    return true;
+  }
+
+  if (task.due?.is_recurring) {
+    return dueYmd === todayYmd;
+  }
+
+  return dueYmd >= todayYmd;
 };
 
 const getTodoistAuthHeaders = (): Record<string, string> => {
@@ -127,7 +206,7 @@ const summarizeTodoistError = (err: any): string => {
   }
 
   if (status === 404) {
-    return "Todoist grocery project was not found.";
+    return "Todoist TODO project was not found.";
   }
 
   return message;
@@ -137,13 +216,6 @@ const isTodoistTimeoutError = (err: any): boolean => {
   const code = String(err?.code ?? "");
   const message = String(err?.message ?? "").toLowerCase();
   return code === "ECONNABORTED" || message.includes("timeout");
-};
-
-const listTodoistProjects = async (): Promise<ITodoistProject[]> => {
-  const response = await todoistClient.get<ITodoistProject[]>("/rest/v2/projects", {
-    headers: getTodoistAuthHeaders(),
-  });
-  return response.data ?? [];
 };
 
 const getProjectById = async (projectId: string): Promise<ITodoistProject | null> => {
@@ -159,15 +231,6 @@ const getProjectById = async (projectId: string): Promise<ITodoistProject | null
     }
     throw err;
   }
-};
-
-const findProjectByName = async (name: string): Promise<ITodoistProject | null> => {
-  const normalizedTarget = normalizeItemText(name).toLowerCase();
-  const projects = await listTodoistProjects();
-  const match = projects.find(
-    (project) => normalizeItemText(project.name ?? "").toLowerCase() === normalizedTarget,
-  );
-  return match ?? null;
 };
 
 const listProjectSections = async (projectId: string): Promise<ITodoistSection[]> => {
@@ -186,28 +249,6 @@ const listActiveProjectTasks = async (projectId: string): Promise<ITodoistTask[]
   return response.data ?? [];
 };
 
-const listCompletedProjectTasks = async (projectId: string): Promise<ITodoistCompletedItem[]> => {
-  try {
-    const response = await todoistClient.get<ITodoistCompletedResponse>(
-      "/sync/v9/completed/get_all",
-      {
-        headers: getTodoistAuthHeaders(),
-        params: {
-          limit: TODOIST_COMPLETED_LIMIT,
-          project_id: projectId,
-        },
-      },
-    );
-    return response.data?.items ?? [];
-  } catch (err: any) {
-    // Completed endpoint can be unavailable for some plans or token scopes.
-    if (Number(err?.response?.status ?? 0) === 404) {
-      return [];
-    }
-    throw err;
-  }
-};
-
 const listProjectCollaborators = async (projectId: string): Promise<ITodoistCollaborator[]> => {
   try {
     const response = await todoistClient.get<ITodoistCollaborator[]>(
@@ -216,7 +257,10 @@ const listProjectCollaborators = async (projectId: string): Promise<ITodoistColl
     );
     return response.data ?? [];
   } catch (err: any) {
-    if (Number(err?.response?.status ?? 0) === 403 || Number(err?.response?.status ?? 0) === 404) {
+    if (
+      Number(err?.response?.status ?? 0) === 403 ||
+      Number(err?.response?.status ?? 0) === 404
+    ) {
       return [];
     }
     throw err;
@@ -244,13 +288,12 @@ const getOrCreateSection = (
   return created;
 };
 
-const buildGroceryListData = (
+const buildTodoListData = (
   project: ITodoistProject,
   sections: ITodoistSection[],
   activeTasks: ITodoistTask[],
-  completedItems: ITodoistCompletedItem[],
   collaborators: ITodoistCollaborator[],
-): IGroceryListData => {
+): IMikeTodoListData => {
   const sectionMap = new Map<string, ISectionSnapshot>();
   const collaboratorNames = new Map<string, string>();
   const rootSectionId = "root";
@@ -295,6 +338,10 @@ const buildGroceryListData = (
     if (!text) {
       continue;
     }
+    const dueLabel = formatTaskDueLabel(task);
+    const displayText = dueLabel
+      ? `${text}\n-# ⠀⠀Due ${dueLabel}`
+      : text;
     const sectionId = task.section_id ? String(task.section_id) : rootSectionId;
     const section = getOrCreateSection(
       sectionMap,
@@ -302,39 +349,12 @@ const buildGroceryListData = (
       rootSectionName,
       Number.MAX_SAFE_INTEGER,
     );
-    section.neededItems.push(text);
+    section.neededItems.push(displayText);
 
     const createdAt = String(task.created_at ?? "");
     if (createdAt && createdAt > sourceUpdatedAt) {
       sourceUpdatedAt = createdAt;
       sourceUpdatedById = String(task.creator_id ?? "");
-    }
-  }
-
-  for (const item of completedItems) {
-    const text = normalizeItemText(item.content ?? "");
-    if (!text) {
-      continue;
-    }
-    const completedAt = String(item.completed_at ?? "");
-    if (!isCompletedWithinOneDay(completedAt)) {
-      continue;
-    }
-    const sectionId = item.section_id ? String(item.section_id) : rootSectionId;
-    const section = getOrCreateSection(
-      sectionMap,
-      sectionId,
-      rootSectionName,
-      Number.MAX_SAFE_INTEGER,
-    );
-    section.completedItems.push({
-      completedAt: completedAt || undefined,
-      text,
-    });
-
-    if (completedAt && completedAt > sourceUpdatedAt) {
-      sourceUpdatedAt = completedAt;
-      sourceUpdatedById = String(item.completed_by_id ?? item.completed_by_uid ?? "");
     }
   }
 
@@ -344,7 +364,7 @@ const buildGroceryListData = (
 
   return {
     listId: String(project.id ?? ""),
-    listTitle: String(project.name ?? TODOIST_CONFIG.groceryProjectName),
+    listTitle: String(project.name ?? "Michael's TODO List"),
     sections: orderedSections,
     sourceUpdatedAt: sourceUpdatedAt || undefined,
     sourceUpdatedBy: sourceUpdatedById
@@ -353,105 +373,68 @@ const buildGroceryListData = (
   };
 };
 
-const getGroceryListData = async (): Promise<IGroceryListData> => {
-  const configuredProjectId = TODOIST_CONFIG.groceryProjectId || cachedProjectId;
-  let project: ITodoistProject | null = null;
-
-  if (configuredProjectId) {
-    project = await getProjectById(configuredProjectId);
-  }
-
-  if (!project) {
-    project = await findProjectByName(TODOIST_CONFIG.groceryProjectName);
-  }
-
-  if (!project) {
-    throw new Error(
-      `Todoist project not found. Name="${TODOIST_CONFIG.groceryProjectName}" ` +
-      `ID="${configuredProjectId || "(none)"}".`,
-    );
-  }
-
-  const projectId = String(project.id ?? "");
+const getMikeTodoListData = async (): Promise<IMikeTodoListData> => {
+  const projectId = TODOIST_CONFIG.mikeTodoProjectId;
   if (!projectId) {
-    throw new Error("Todoist project ID was empty.");
+    throw new Error("TODOIST_MIKE_TODO_PROJECT_ID is not configured.");
   }
 
-  const [sections, activeTasks, completedItems, collaborators] = await Promise.all([
+  const project = await getProjectById(projectId);
+  if (!project) {
+    throw new Error(`Todoist project not found. ID="${projectId}".`);
+  }
+
+  const [sections, activeTasks, collaborators] = await Promise.all([
     listProjectSections(projectId),
     listActiveProjectTasks(projectId),
-    listCompletedProjectTasks(projectId),
     listProjectCollaborators(projectId),
   ]);
 
-  const data = buildGroceryListData(project, sections, activeTasks, completedItems, collaborators);
-  if (!TODOIST_CONFIG.groceryProjectId && data.listId) {
-    cachedProjectId = data.listId;
-  }
-  return data;
-};
-
-const buildSectionMarkdown = (section: ISectionSnapshot): string => {
-  const normalizedSectionName = normalizeItemText(section.name).toLowerCase();
-  const sectionEmojiMap: Record<string, string> = {
-    "bread aisle": ":bread:",
-    "dairy aisle": ":cheese:",
-    "dry goods aisles": ":canned_food:",
-    "frozen aisles": ":ice_cream:",
-    "meat aisle": ":cut_of_meat:",
-    "pharmacy area": ":pill:",
-    "produce section": ":apple:",
-  };
-  const sectionEmoji = sectionEmojiMap[normalizedSectionName] ?? ":shopping_basket:";
-
-  const lines: string[] = [`## ${sectionEmoji}⠀${section.name}`];
-
-  if (section.neededItems.length > 0) {
-    lines.push(section.neededItems.map((item) => `- ${item}`).join("\n"));
-  } else if (section.completedItems.length === 0) {
-    lines.push("- none");
-  }
-
-  if (section.completedItems.length > 0) {
-    lines.push(section.completedItems.map((item) => `- ~~${item.text}~~`).join("\n"));
-  }
-
-  return lines.join("\n");
+  const visibleTasks = activeTasks.filter((task) => shouldRenderTask(task));
+  return buildTodoListData(project, sections, visibleTasks, collaborators);
 };
 
 const buildSectionContainer = (section: ISectionSnapshot): ContainerBuilder => {
+  const normalizedSectionName = normalizeItemText(section.name).toLowerCase();
+  const sectionEmojiMap: Record<string, string> = {
+    "recurring tasks": ":recycle:",
+    work: "<:nys:1470896363670863987>",
+    financial: ":dollar:",
+    home: ":house:",
+    personal: ":bust_in_silhouette:",
+    "for others": ":family_adult_adult_child_child:",
+    };
+  const sectionEmoji = sectionEmojiMap[normalizedSectionName] ?? "🧩";
+
+  const lines: string[] = [`## ${sectionEmoji}⠀${section.name}`];
+  lines.push(
+    section.neededItems.length > 0
+      ? section.neededItems.map((item) => `- ${item}`).join("\n")
+      : "- none",
+  );
+  if (section.completedItems.length > 0) {
+    lines.push("");
+    lines.push("### ✅ Completed");
+    lines.push(section.completedItems.map((item) => `- ~~${item}~~`).join("\n"));
+  }
+
   return new ContainerBuilder().addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(buildSectionMarkdown(section)),
+    new TextDisplayBuilder().setContent(lines.join("\n")),
   );
 };
 
-const buildInstructionsContainer = (): ContainerBuilder => {
-  return new ContainerBuilder().addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      "## Instructions\n" +
-      "1. Download Todoist on your phone:\n" +
-      "https://play.google.com/store/apps/details?id=com.todoist\n" +
-      "2. Open Todoist and create an account using your Google account.\n" +
-      "3. Check your Todoist inbox and accept the invite to the **Family Grocery List** project from **Mike**.",
-    ),
-  );
-};
-
-const buildGroceryListComponents = (
-  data: IGroceryListData | null,
+const buildTodoListComponents = (
+  data: IMikeTodoListData | null,
   syncDate: Date,
   errorText?: string,
 ): ContainerBuilder[] => {
   const components: ContainerBuilder[] = [];
-
   const overviewContainer = new ContainerBuilder();
   overviewContainer.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent("# Family Grocery List"),
+    new TextDisplayBuilder().setContent("# Michael's TODO List"),
   );
 
-  const lastUpdatedLine = data?.sourceUpdatedBy
-    ? `-# Last updated: ${formatTimestampEt(syncDate)} · Last list change by: ${data.sourceUpdatedBy}`
-    : `-# Last updated: ${formatTimestampEt(syncDate)}`;
+  const lastUpdatedLine = `-# Last updated: ${formatTimestampEt(syncDate)}`;
 
   if (errorText) {
     overviewContainer.addTextDisplayComponents(
@@ -463,7 +446,6 @@ const buildGroceryListComponents = (
       new TextDisplayBuilder().setContent(lastUpdatedLine),
     );
     components.push(overviewContainer);
-    components.push(buildInstructionsContainer());
     return components;
   }
 
@@ -475,10 +457,11 @@ const buildGroceryListComponents = (
   if (!data || data.sections.length === 0) {
     components.push(
       new ContainerBuilder().addTextDisplayComponents(
-        new TextDisplayBuilder().setContent("## 🧺 Sections\nNo grocery items found."),
+        new TextDisplayBuilder().setContent(
+          "## ✅ Tasks\nNo tasks to show.",
+        ),
       ),
     );
-    components.push(buildInstructionsContainer());
     return components;
   }
 
@@ -486,35 +469,28 @@ const buildGroceryListComponents = (
     components.push(buildSectionContainer(section));
   }
 
-  components.push(buildInstructionsContainer());
-
   return components;
 };
 
-const buildFingerprint = (data: IGroceryListData | null, errorText?: string): string => {
+const buildFingerprint = (data: IMikeTodoListData | null, errorText?: string): string => {
   if (errorText) return `error:${errorText}`;
   if (!data) return "empty";
   const sectionSummary = data.sections
     .map((section) => [
       section.name,
       section.neededItems.join("|"),
-      section.completedItems.map((item) => `${item.text}:${item.completedAt ?? ""}`).join("|"),
+      section.completedItems.join("|"),
     ].join("::"))
     .join("||");
-  return [
-    data.listId,
-    data.sourceUpdatedAt ?? "",
-    sectionSummary,
-  ].join("##");
+  return [data.listId, data.sourceUpdatedAt ?? "", data.sourceUpdatedBy ?? "", sectionSummary].join(
+    "##",
+  );
 };
 
-const upsertGroceryListMessage = async (
-  channelId: string,
-  messageId: string,
-): Promise<void> => {
+const upsertTodoListMessage = async (channelId: string, messageId: string): Promise<void> => {
   await query(
     `
-      MERGE INTO CALENDAR_GroceryListMessages target
+      MERGE INTO CALENDAR_MikeTodoListMessages target
       USING (SELECT :channelId AS CHANNEL_ID, :messageId AS MESSAGE_ID FROM DUAL) source
       ON (target.CHANNEL_ID = source.CHANNEL_ID)
       WHEN MATCHED THEN
@@ -529,7 +505,7 @@ const upsertGroceryListMessage = async (
 
 const getTrackedMessageId = async (channelId: string): Promise<string> => {
   const rows = await query<any>(
-    `SELECT MESSAGE_ID FROM CALENDAR_GroceryListMessages WHERE CHANNEL_ID = :channelId`,
+    `SELECT MESSAGE_ID FROM CALENDAR_MikeTodoListMessages WHERE CHANNEL_ID = :channelId`,
     { channelId },
   );
   if (!rows.length) return "";
@@ -539,21 +515,17 @@ const getTrackedMessageId = async (channelId: string): Promise<string> => {
 const ensureTrackedMessage = async (client: Client, channelId: string): Promise<string> => {
   const channel = await client.channels.fetch(channelId);
   if (!channel || !channel.isTextBased()) {
-    throw new Error(`Grocery list channel ${channelId} is unavailable or not text-based.`);
+    throw new Error(`TODO list channel ${channelId} is unavailable or not text-based.`);
   }
 
   const trackedMessageId = await getTrackedMessageId(channelId);
   if (!trackedMessageId) {
-    const bootstrapPayload = buildGroceryListComponents(
-      null,
-      new Date(),
-      "Initial sync pending...",
-    );
+    const bootstrapPayload = buildTodoListComponents(null, new Date(), "Initial sync pending...");
     const message = await (channel as any).send({
       components: bootstrapPayload,
       flags: MessageFlags.IsComponentsV2,
     });
-    await upsertGroceryListMessage(channelId, message.id);
+    await upsertTodoListMessage(channelId, message.id);
     return message.id;
   }
 
@@ -566,39 +538,38 @@ const ensureTrackedMessage = async (client: Client, channelId: string): Promise<
     }
   }
 
-  const bootstrapPayload = buildGroceryListComponents(
+  const bootstrapPayload = buildTodoListComponents(
     null,
     new Date(),
     "Tracked message was missing. Recreated by bot.",
   );
-  const newMessage = await (channel as any).send({
+  const message = await (channel as any).send({
     components: bootstrapPayload,
     flags: MessageFlags.IsComponentsV2,
   });
-  await upsertGroceryListMessage(channelId, newMessage.id);
-  return newMessage.id;
+  await upsertTodoListMessage(channelId, message.id);
+  return message.id;
 };
 
-const updateGroceryListMessage = async (client: Client, channelId: string): Promise<void> => {
+const updateTodoListMessage = async (client: Client, channelId: string): Promise<void> => {
   const channel = await client.channels.fetch(channelId);
   if (!channel || !channel.isTextBased()) {
-    throw new Error(`Grocery list channel ${channelId} is unavailable or not text-based.`);
+    throw new Error(`TODO list channel ${channelId} is unavailable or not text-based.`);
   }
 
   const messageId = await ensureTrackedMessage(client, channelId);
-
-  let listData: IGroceryListData | null = null;
+  let listData: IMikeTodoListData | null = null;
   let errorText = "";
   try {
-    listData = await getGroceryListData();
+    listData = await getMikeTodoListData();
   } catch (err: any) {
     if (isTodoistTimeoutError(err)) {
-      console.warn("[GroceryList] Todoist sync timed out. Keeping existing static post.");
+      console.warn("[MikeTodoList] Todoist sync timed out. Keeping existing static post.");
       return;
     }
 
     errorText = summarizeTodoistError(err);
-    console.error("[GroceryList] Failed to fetch Todoist project:", {
+    console.error("[MikeTodoList] Failed to fetch Todoist project:", {
       message: err?.message ?? String(err),
       status: err?.response?.status ?? "",
       summary: errorText,
@@ -610,11 +581,7 @@ const updateGroceryListMessage = async (client: Client, channelId: string): Prom
     return;
   }
 
-  const payload = buildGroceryListComponents(
-    listData,
-    new Date(),
-    errorText || undefined,
-  );
+  const payload = buildTodoListComponents(listData, new Date(), errorText || undefined);
   const message = await (channel as any).messages.fetch(messageId);
   await message.edit({
     components: payload,
@@ -623,40 +590,34 @@ const updateGroceryListMessage = async (client: Client, channelId: string): Prom
   lastPayloadFingerprint = fingerprint;
 };
 
-export const runGroceryListSync = async (
-  client: Client,
-  channelId: string,
-): Promise<void> => {
-  if (grocerySyncInProgress) {
+export const runMikeTodoListSync = async (client: Client, channelId: string): Promise<void> => {
+  if (todoSyncInProgress) {
     return;
   }
 
-  grocerySyncInProgress = true;
+  todoSyncInProgress = true;
   try {
-    await updateGroceryListMessage(client, channelId);
+    await updateTodoListMessage(client, channelId);
   } finally {
-    grocerySyncInProgress = false;
+    todoSyncInProgress = false;
   }
 };
 
-export const startGroceryListSyncService = (
-  client: Client,
-  channelId: string,
-): void => {
-  if (groceryTimer) {
+export const startMikeTodoListSyncService = (client: Client, channelId: string): void => {
+  if (todoTimer) {
     return;
   }
 
   const run = async (): Promise<void> => {
     try {
-      await runGroceryListSync(client, channelId);
+      await runMikeTodoListSync(client, channelId);
     } catch (err) {
-      console.error("[GroceryList] Sync loop failed:", err);
+      console.error("[MikeTodoList] Sync loop failed:", err);
     }
   };
 
   void run();
-  groceryTimer = setInterval(() => {
+  todoTimer = setInterval(() => {
     void run();
-  }, GROCERY_SYNC_INTERVAL_MS);
+  }, TODO_SYNC_INTERVAL_MS);
 };
