@@ -55,6 +55,32 @@ describe("mikeTodoListService recurring task rendering", () => {
     assert.equal(String(visible[0].id), "recurring-weekly");
   });
 
+  it("for recurring tasks, excludes future items when recurringCutoffYmd is set", () => {
+    const start = "2026-02-11";
+    const tasks = [
+      buildTask({
+        due: { date: addDays(start, -1), is_recurring: true },
+        id: "recurring-past",
+      }),
+      buildTask({
+        due: { date: start, is_recurring: true },
+        id: "recurring-today",
+      }),
+      buildTask({
+        due: { date: addDays(start, 1), is_recurring: true },
+        id: "recurring-tomorrow",
+      }),
+    ];
+
+    const visible = __mikeTodoListTestables.filterVisibleTasks(tasks, {
+      includeOverdue: true,
+      recurringCutoffYmd: start,
+      startYmd: start,
+    });
+    const visibleIds = visible.map((task) => String(task.id));
+    assert.deepEqual(visibleIds, ["recurring-past", "recurring-today"]);
+  });
+
   it("includes overdue non-recurring tasks when includeOverdue is enabled", () => {
     const start = "2026-02-11";
     const tasks = [

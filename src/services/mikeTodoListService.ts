@@ -47,6 +47,7 @@ interface ITodoistTask {
 interface ITaskRenderRange {
   endYmd?: string;
   includeOverdue?: boolean;
+  recurringCutoffYmd?: string;
   startYmd: string;
 }
 
@@ -349,6 +350,19 @@ const shouldRenderTask = (task: ITodoistTask, range: ITaskRenderRange): boolean 
       return false;
     }
     return true;
+  }
+
+  if (task.due?.is_recurring && range.recurringCutoffYmd) {
+    if (!isValidYmd(range.recurringCutoffYmd)) {
+      return false;
+    }
+    if (dueYmd > range.recurringCutoffYmd) {
+      return false;
+    }
+    if (range.includeOverdue) {
+      return true;
+    }
+    return dueYmd >= range.startYmd;
   }
 
   return isYmdInRenderRange(dueYmd, range);
@@ -751,6 +765,7 @@ const getMikeTodoListData = async (): Promise<IMikeTodoListData> => {
   const todayYmd = formatYmdInTimezone(new Date(), REMINDER_TIMEZONE);
   const visibleTasks = filterVisibleTasks(activeTasks, {
     includeOverdue: true,
+    recurringCutoffYmd: todayYmd,
     startYmd: todayYmd,
   });
   return buildTodoListData(project, sections, visibleTasks, collaborators);
