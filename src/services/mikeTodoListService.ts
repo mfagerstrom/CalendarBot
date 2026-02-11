@@ -694,29 +694,26 @@ const updateTodoListMessage = async (client: Client, channelId: string): Promise
 
   const messageId = await ensureTrackedMessage(client, channelId);
   let listData: IMikeTodoListData | null = null;
-  let errorText = "";
   try {
     listData = await getMikeTodoListData();
   } catch (err: any) {
-    if (isTodoistTimeoutError(err)) {
-      console.warn("[MikeTodoList] Todoist sync timed out. Keeping existing static post.");
-      return;
-    }
-
-    errorText = summarizeTodoistError(err);
-    console.error("[MikeTodoList] Failed to fetch Todoist project:", {
+    const isTimeout = isTodoistTimeoutError(err);
+    const summary = summarizeTodoistError(err);
+    console.error("[MikeTodoList] Failed to fetch Todoist project; leaving existing message unchanged:", {
       message: err?.message ?? String(err),
       status: err?.response?.status ?? "",
-      summary: errorText,
+      timeout: isTimeout,
+      summary,
     });
-  }
-
-  const fingerprint = buildFingerprint(listData, errorText);
-  if (fingerprint === lastPayloadFingerprint && !errorText) {
     return;
   }
 
-  const payload = buildTodoListComponents(listData, new Date(), errorText || undefined);
+  const fingerprint = buildFingerprint(listData);
+  if (fingerprint === lastPayloadFingerprint) {
+    return;
+  }
+
+  const payload = buildTodoListComponents(listData, new Date());
   const message = await (channel as any).messages.fetch(messageId);
   await message.edit({
     components: payload,
