@@ -39,6 +39,7 @@ interface ITodoistCollaborator {
 
 interface ITodoistPaginatedResponse<T> {
   next_cursor?: string | null;
+  items?: T[];
   results?: T[];
 }
 
@@ -137,10 +138,15 @@ const listTodoistV1Paginated = async <T>(
         limit: 200,
       },
     });
-    const payload = response.data as ITodoistPaginatedResponse<T>;
+    const payload = response.data as ITodoistPaginatedResponse<T> | T[] | null | undefined;
+    if (Array.isArray(payload)) {
+      rows.push(...payload);
+      break;
+    }
 
-    rows.push(...(payload.results ?? []));
-    cursor = payload.next_cursor ?? null;
+    const pageResults = payload?.results ?? payload?.items ?? [];
+    rows.push(...pageResults);
+    cursor = payload?.next_cursor ?? null;
     if (!cursor) {
       break;
     }
@@ -154,9 +160,18 @@ const listTodoistProjects = async (): Promise<ITodoistProject[]> => {
 };
 
 const getProjectById = async (projectId: string): Promise<ITodoistProject | null> => {
-  const projects = await listTodoistProjects();
-  const match = projects.find((project) => String(project.id ?? "") === projectId);
-  return match ?? null;
+  try {
+    const response = await todoistClient.get<ITodoistProject>(
+      `/api/v1/projects/${encodeURIComponent(projectId)}`,
+      { headers: getTodoistAuthHeaders() },
+    );
+    return response.data ?? null;
+  } catch (err: any) {
+    if (Number(err?.response?.status ?? 0) === 404) {
+      return null;
+    }
+    throw err;
+  }
 };
 
 const findProjectByName = async (name: string): Promise<ITodoistProject | null> => {
