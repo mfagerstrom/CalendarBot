@@ -53,7 +53,6 @@ export const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
   ],
-  botGuilds: process.env.GUILD_ID ? [process.env.GUILD_ID] : undefined,
   silent: false, // Enable debug logging for discordx
 });
 

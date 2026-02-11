@@ -1,5 +1,11 @@
 # Commit History
-Last synced: 2026-02-10 (session sync)
+Last synced: 2026-02-11 (session sync)
+- 2026-02-11: da51090 fixed bad todoist api calls
+- 2026-02-11: e7eb9e9 fixed bad todoist api calls
+- 2026-02-11: 2213d22 fixed bad todoist api calls
+- 2026-02-11: 42f9d75 fix: todoist posts should never be replaced with sync error messages.
+- 2026-02-11: fba1a84 fix: corrected grocery list api version usage
+- 2026-02-10: 9f7eae7 feat: mike todo tweaks
 - 2026-02-10: 32b066f fixes
 - 2026-02-10: bd4f2d8 Implemented a TODO list for myself using Todoist
 - 2026-02-10: 9e909b2 implemented a grocery list feature driven by Todoist
