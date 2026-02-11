@@ -37,8 +37,9 @@ interface ITodoistCollaborator {
   name?: string;
 }
 
-interface ITodoistCollaboratorsResponseV1 {
-  results?: ITodoistCollaborator[];
+interface ITodoistPaginatedResponse<T> {
+  next_cursor?: string | null;
+  results?: T[];
 }
 
 interface ICompletedItemSnapshot {
@@ -107,6 +108,10 @@ const summarizeTodoistError = (err: any): string => {
     return "Todoist grocery project was not found.";
   }
 
+  if (status === 410) {
+    return "Todoist endpoint is deprecated/removed (HTTP 410).";
+  }
+
   return message;
 };
 
@@ -116,26 +121,42 @@ const isTodoistTimeoutError = (err: any): boolean => {
   return code === "ECONNABORTED" || message.includes("timeout");
 };
 
+const listTodoistV1Paginated = async <T>(
+  path: string,
+  params: Record<string, string | number | undefined> = {},
+): Promise<T[]> => {
+  const rows: T[] = [];
+  let cursor: string | null | undefined = undefined;
+
+  for (let page = 0; page < 50; page += 1) {
+    const response = await todoistClient.get(path, {
+      headers: getTodoistAuthHeaders(),
+      params: {
+        ...params,
+        cursor: cursor ?? undefined,
+        limit: 200,
+      },
+    });
+    const payload = response.data as ITodoistPaginatedResponse<T>;
+
+    rows.push(...(payload.results ?? []));
+    cursor = payload.next_cursor ?? null;
+    if (!cursor) {
+      break;
+    }
+  }
+
+  return rows;
+};
+
 const listTodoistProjects = async (): Promise<ITodoistProject[]> => {
-  const response = await todoistClient.get<ITodoistProject[]>("/rest/v2/projects", {
-    headers: getTodoistAuthHeaders(),
-  });
-  return response.data ?? [];
+  return listTodoistV1Paginated<ITodoistProject>("/api/v1/projects");
 };
 
 const getProjectById = async (projectId: string): Promise<ITodoistProject | null> => {
-  try {
-    const response = await todoistClient.get<ITodoistProject>(
-      `/rest/v2/projects/${encodeURIComponent(projectId)}`,
-      { headers: getTodoistAuthHeaders() },
-    );
-    return response.data ?? null;
-  } catch (err: any) {
-    if (Number(err?.response?.status ?? 0) === 404) {
-      return null;
-    }
-    throw err;
-  }
+  const projects = await listTodoistProjects();
+  const match = projects.find((project) => String(project.id ?? "") === projectId);
+  return match ?? null;
 };
 
 const findProjectByName = async (name: string): Promise<ITodoistProject | null> => {
@@ -148,33 +169,22 @@ const findProjectByName = async (name: string): Promise<ITodoistProject | null> 
 };
 
 const listProjectSections = async (projectId: string): Promise<ITodoistSection[]> => {
-  const response = await todoistClient.get<ITodoistSection[]>("/rest/v2/sections", {
-    headers: getTodoistAuthHeaders(),
-    params: { project_id: projectId },
+  return listTodoistV1Paginated<ITodoistSection>("/api/v1/sections", {
+    project_id: projectId,
   });
-  return response.data ?? [];
 };
 
 const listActiveProjectTasks = async (projectId: string): Promise<ITodoistTask[]> => {
-  const response = await todoistClient.get<ITodoistTask[]>("/rest/v2/tasks", {
-    headers: getTodoistAuthHeaders(),
-    params: { project_id: projectId },
+  return listTodoistV1Paginated<ITodoistTask>("/api/v1/tasks", {
+    project_id: projectId,
   });
-  return response.data ?? [];
 };
 
 const listProjectCollaborators = async (projectId: string): Promise<ITodoistCollaborator[]> => {
   try {
-    const response = await todoistClient.get<
-      ITodoistCollaborator[] | ITodoistCollaboratorsResponseV1
-    >(
+    return listTodoistV1Paginated<ITodoistCollaborator>(
       `/api/v1/projects/${encodeURIComponent(projectId)}/collaborators`,
-      { headers: getTodoistAuthHeaders() },
     );
-    if (Array.isArray(response.data)) {
-      return response.data;
-    }
-    return response.data?.results ?? [];
   } catch (err: any) {
     if (
       Number(err?.response?.status ?? 0) === 403 ||
@@ -531,6 +541,8 @@ const updateGroceryListMessage = async (client: Client, channelId: string): Prom
     console.error("[GroceryList] Failed to fetch Todoist project; leaving existing message unchanged:", {
       message: err?.message ?? String(err),
       status: err?.response?.status ?? "",
+      method: err?.config?.method ?? "",
+      url: err?.config?.url ?? "",
       timeout: isTimeout,
       summary,
     });

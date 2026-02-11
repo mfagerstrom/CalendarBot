@@ -40,7 +40,7 @@ const DISALLOWED_TOP_LEVEL_COMPONENT_BUILDERS = new Set([
   "ThumbnailBuilder",
   "SeparatorBuilder",
 ]);
-const DEPRECATED_TODOIST_PATH_PATTERNS = ["/sync/v9/"];
+const DEPRECATED_TODOIST_PATH_PATTERNS = ["/sync/v9/", "/rest/v2/"];
 
 function isRelativeImportPath(value) {
   return typeof value === "string" && value.startsWith(".");
@@ -1212,12 +1212,12 @@ export default {
         type: "problem",
         docs: {
           description:
-            "Disallow deprecated Todoist Sync API v9 endpoints.",
+            "Disallow deprecated Todoist endpoints such as Sync API v9 and REST v2.",
         },
         schema: [],
         messages: {
           deprecatedTodoistPath:
-            "Todoist Sync API v9 is deprecated. Use Todoist REST v2 endpoints instead.",
+            "Todoist endpoint is deprecated. Use Todoist API v1 endpoints instead.",
         },
       },
       create(context) {
