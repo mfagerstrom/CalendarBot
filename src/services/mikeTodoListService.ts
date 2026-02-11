@@ -491,6 +491,14 @@ const buildTodoListData = (
   activeTasks: ITodoistTask[],
   collaborators: ITodoistCollaborator[],
 ): IMikeTodoListData => {
+  const sectionDisplayOrder: Record<string, number> = {
+    "recurring tasks": 1,
+    work: 2,
+    personal: 3,
+    home: 4,
+    financial: 5,
+    "for others": 6,
+  };
   const sectionMap = new Map<string, ISectionSnapshot>();
   const preparedBySection = new Map<string, IPreparedTodoTask[]>();
   const collaboratorNames = new Map<string, string>();
@@ -578,7 +586,14 @@ const buildTodoListData = (
 
   const orderedSections = Array.from(sectionMap.values())
     .filter((section) => section.neededItems.length > 0 || section.completedItems.length > 0)
-    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+    .sort((a, b) => {
+      const aPriority = sectionDisplayOrder[normalizeItemText(a.name).toLowerCase()] ?? 99;
+      const bPriority = sectionDisplayOrder[normalizeItemText(b.name).toLowerCase()] ?? 99;
+      if (aPriority !== bPriority) {
+        return aPriority - bPriority;
+      }
+      return a.order - b.order || a.name.localeCompare(b.name);
+    });
 
   return {
     listId: String(project.id ?? ""),
