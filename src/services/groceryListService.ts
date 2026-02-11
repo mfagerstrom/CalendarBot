@@ -12,6 +12,7 @@ const REMINDER_TIMEZONE = "America/New_York";
 const GROCERY_SYNC_INTERVAL_MS = 60 * 1000;
 const TODOIST_API_BASE_URL = "https://api.todoist.com";
 const TODOIST_COMPLETED_LIMIT = 200;
+const COMPLETED_ITEM_RETENTION_MS = 2 * 60 * 60 * 1000;
 
 interface ITodoistProject {
   id: string;
@@ -93,7 +94,7 @@ const formatTimestampEt = (date: Date): string => {
   return `${text} ET`;
 };
 
-const isCompletedWithinOneDay = (completedAtRaw?: string): boolean => {
+const isCompletedWithinRetentionWindow = (completedAtRaw?: string): boolean => {
   if (!completedAtRaw) {
     return false;
   }
@@ -104,7 +105,7 @@ const isCompletedWithinOneDay = (completedAtRaw?: string): boolean => {
   }
 
   const ageMs = Date.now() - completedAt.getTime();
-  return ageMs >= 0 && ageMs <= 24 * 60 * 60 * 1000;
+  return ageMs >= 0 && ageMs <= COMPLETED_ITEM_RETENTION_MS;
 };
 
 const getTodoistAuthHeaders = (): Record<string, string> => {
@@ -317,7 +318,7 @@ const buildGroceryListData = (
       continue;
     }
     const completedAt = String(item.completed_at ?? "");
-    if (!isCompletedWithinOneDay(completedAt)) {
+    if (!isCompletedWithinRetentionWindow(completedAt)) {
       continue;
     }
     const sectionId = item.section_id ? String(item.section_id) : rootSectionId;

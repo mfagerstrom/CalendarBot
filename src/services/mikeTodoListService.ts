@@ -1,5 +1,10 @@
 import axios from "axios";
-import { ContainerBuilder, TextDisplayBuilder } from "@discordjs/builders";
+import {
+  ActionRowBuilder,
+  ContainerBuilder,
+  StringSelectMenuBuilder,
+  TextDisplayBuilder,
+} from "@discordjs/builders";
 import { MessageFlags } from "discord.js";
 import type { Client } from "discordx";
 import { TODOIST_CONFIG } from "../config/todoist.js";
@@ -8,6 +13,8 @@ import { query } from "../lib/db/oracle.js";
 const REMINDER_TIMEZONE = "America/New_York";
 const TODO_SYNC_INTERVAL_MS = 60 * 1000;
 const TODOIST_API_BASE_URL = "https://api.todoist.com";
+const MIKE_TODO_COMPLETE_SELECT_PREFIX = "mike-todo-complete";
+const MIKE_TODO_COMPLETE_SELECT_OPTION_LIMIT = 20;
 
 interface ITodoistProject {
   id: string;
@@ -45,6 +52,8 @@ interface ISectionSnapshot {
   name: string;
   neededItems: string[];
   order: number;
+  sectionId: string;
+  taskOptions: ISectionTaskOption[];
 }
 
 interface IMikeTodoListData {
@@ -56,11 +65,18 @@ interface IMikeTodoListData {
 }
 
 interface IPreparedTodoTask {
+  completableId: string;
   dueLabel: string;
+  depth: number;
   id: string;
   text: string;
   order: number;
   parentId: string;
+}
+
+interface ISectionTaskOption {
+  label: string;
+  value: string;
 }
 
 let todoTimer: NodeJS.Timeout | null = null;
@@ -271,6 +287,8 @@ const getOrCreateSection = (
     name: fallbackName,
     neededItems: [],
     order: fallbackOrder,
+    sectionId,
+    taskOptions: [],
   };
   sections.set(sectionId, created);
   return created;
@@ -285,9 +303,18 @@ const sortPreparedTasks = (a: IPreparedTodoTask, b: IPreparedTodoTask): number =
   return a.order - b.order || a.text.localeCompare(b.text);
 };
 
-const buildSectionTaskLines = (tasks: IPreparedTodoTask[]): string[] => {
+const buildTaskSelectLabel = (task: IPreparedTodoTask): string => {
+  const prefix = task.depth > 0 ? `${"↳ ".repeat(Math.min(task.depth, 3))}` : "";
+  const duePrefix = task.dueLabel ? `[${task.dueLabel}] ` : "";
+  return `${prefix}${duePrefix}${task.text}`.slice(0, 100);
+};
+
+const buildSectionTaskData = (tasks: IPreparedTodoTask[]): {
+  lines: string[];
+  options: ISectionTaskOption[];
+} => {
   if (!tasks.length) {
-    return [];
+    return { lines: [], options: [] };
   }
 
   const byId = new Map<string, IPreparedTodoTask>();
@@ -322,10 +349,11 @@ const buildSectionTaskLines = (tasks: IPreparedTodoTask[]): string[] => {
       return task.text;
     }
     const paddedDueLabel = task.dueLabel.padEnd(dueLabelWidth, " ");
-    return `\`${paddedDueLabel}\` ${task.text}`;
+    return `\`${paddedDueLabel}\`⠀${task.text}`;
   };
 
   const lines: string[] = [];
+  const options: ISectionTaskOption[] = [];
   const visited = new Set<string>();
 
   const walk = (task: IPreparedTodoTask, depth: number): void => {
@@ -334,7 +362,14 @@ const buildSectionTaskLines = (tasks: IPreparedTodoTask[]): string[] => {
     }
     visited.add(task.id);
 
+    task.depth = depth;
     lines.push(`${"  ".repeat(depth)}- ${formatTaskLine(task, depth)}`);
+    if (task.completableId && options.length < MIKE_TODO_COMPLETE_SELECT_OPTION_LIMIT) {
+      options.push({
+        label: buildTaskSelectLabel(task),
+        value: task.completableId,
+      });
+    }
     const children = childMap.get(task.id) ?? [];
     for (const child of children) {
       walk(child, depth + 1);
@@ -351,7 +386,7 @@ const buildSectionTaskLines = (tasks: IPreparedTodoTask[]): string[] => {
     }
   }
 
-  return lines;
+  return { lines, options };
 };
 
 const buildTodoListData = (
@@ -385,6 +420,8 @@ const buildTodoListData = (
       name: normalizeItemText(section.name ?? "") || "Untitled",
       neededItems: [],
       order: Number(section.order ?? 0),
+      sectionId,
+      taskOptions: [],
     });
   }
 
@@ -394,6 +431,8 @@ const buildTodoListData = (
       name: rootSectionName,
       neededItems: [],
       order: Number.MAX_SAFE_INTEGER,
+      sectionId: rootSectionId,
+      taskOptions: [],
     });
   }
 
@@ -410,9 +449,12 @@ const buildTodoListData = (
     getOrCreateSection(sectionMap, sectionId, rootSectionName, Number.MAX_SAFE_INTEGER);
 
     const preparedTasks = preparedBySection.get(sectionId) ?? [];
+    const taskId = String(task.id ?? "");
     preparedTasks.push({
+      completableId: taskId,
       dueLabel,
-      id: String(task.id ?? `${sectionId}:${preparedTasks.length}:${text}`),
+      depth: 0,
+      id: taskId || `${sectionId}:${preparedTasks.length}:${text}`,
       text,
       order: Number(task.order ?? Number.MAX_SAFE_INTEGER),
       parentId: String(task.parent_id ?? ""),
@@ -433,7 +475,9 @@ const buildTodoListData = (
       rootSectionName,
       Number.MAX_SAFE_INTEGER,
     );
-    section.neededItems = buildSectionTaskLines(tasks);
+    const taskData = buildSectionTaskData(tasks);
+    section.neededItems = taskData.lines;
+    section.taskOptions = taskData.options;
   }
 
   const orderedSections = Array.from(sectionMap.values())
@@ -492,13 +536,26 @@ const buildSectionContainer = (section: ISectionSnapshot): ContainerBuilder => {
   );
   if (section.completedItems.length > 0) {
     lines.push("");
-    lines.push("### ✅ Completed");
+    lines.push("## ✅ Completed");
     lines.push(section.completedItems.map((item) => `- ~~${item}~~`).join("\n"));
   }
 
-  return new ContainerBuilder().addTextDisplayComponents(
+  const container = new ContainerBuilder().addTextDisplayComponents(
     new TextDisplayBuilder().setContent(lines.join("\n")),
   );
+
+  if (section.taskOptions.length > 0) {
+    const select = new StringSelectMenuBuilder()
+      .setCustomId(`${MIKE_TODO_COMPLETE_SELECT_PREFIX}:${section.sectionId}`)
+      .setPlaceholder("Mark a Task complete")
+      .setMinValues(1)
+      .setMaxValues(1)
+      .addOptions(section.taskOptions);
+    const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
+    container.addActionRowComponents(row);
+  }
+
+  return container;
 };
 
 const buildTodoListComponents = (
@@ -680,6 +737,27 @@ export const runMikeTodoListSync = async (client: Client, channelId: string): Pr
     todoSyncInProgress = false;
   }
 };
+
+export const completeMikeTodoTask = async (
+  client: Client,
+  channelId: string,
+  taskId: string,
+): Promise<void> => {
+  if (!taskId) {
+    throw new Error("Task id is required.");
+  }
+
+  await todoistClient.post(
+    `/rest/v2/tasks/${encodeURIComponent(taskId)}/close`,
+    undefined,
+    { headers: getTodoistAuthHeaders() },
+  );
+
+  lastPayloadFingerprint = "";
+  await updateTodoListMessage(client, channelId);
+};
+
+export const MIKE_TODO_COMPLETE_SELECT_REGEX = /^mike-todo-complete:[^:]+$/;
 
 export const startMikeTodoListSyncService = (client: Client, channelId: string): void => {
   if (todoTimer) {
