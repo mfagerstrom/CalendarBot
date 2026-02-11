@@ -1,4 +1,5 @@
 import axios from "axios";
+import { DateTime } from "luxon";
 import {
   ActionRowBuilder,
   ContainerBuilder,
@@ -38,6 +39,7 @@ interface ITodoistTask {
     date?: string;
     datetime?: string;
     is_recurring?: boolean;
+    string?: string;
   };
   section_id?: string;
 }
@@ -79,6 +81,7 @@ interface IMikeTodoListData {
 interface IPreparedTodoTask {
   completableId: string;
   dueLabel: string;
+  dueSortValue: number;
   depth: number;
   id: string;
   text: string;
@@ -144,6 +147,59 @@ const formatMonthDayTimeInEt = (date: Date): string => {
   return `${month}/${day} ${hour}:${minute}${dayPeriod}`.trim();
 };
 
+const parseDueTimeFromNaturalLanguage = (
+  value: string,
+): { hour: number; minute: number } | null => {
+  const text = normalizeItemText(value).toLowerCase();
+  if (!text) {
+    return null;
+  }
+
+  const meridiemMatch = text.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+  if (meridiemMatch) {
+    const rawHour = Number(meridiemMatch[1] ?? "");
+    const rawMinute = Number(meridiemMatch[2] ?? "0");
+    if (Number.isNaN(rawHour) || Number.isNaN(rawMinute)) {
+      return null;
+    }
+    if (rawHour < 1 || rawHour > 12 || rawMinute < 0 || rawMinute > 59) {
+      return null;
+    }
+    let hour = rawHour % 12;
+    if ((meridiemMatch[3] ?? "").toLowerCase() === "pm") {
+      hour += 12;
+    }
+    return { hour, minute: rawMinute };
+  }
+
+  const twentyFourHourMatch = text.match(/\bat\s+([01]?\d|2[0-3]):([0-5]\d)\b/);
+  if (!twentyFourHourMatch) {
+    return null;
+  }
+  const hour = Number(twentyFourHourMatch[1] ?? "");
+  const minute = Number(twentyFourHourMatch[2] ?? "");
+  if (Number.isNaN(hour) || Number.isNaN(minute)) {
+    return null;
+  }
+  return { hour, minute };
+};
+
+const parseEtDateTime = (
+  ymd: string,
+  hour: number,
+  minute: number,
+  second: number,
+): Date | null => {
+  const value = DateTime.fromISO(
+    `${ymd}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`,
+    { zone: REMINDER_TIMEZONE },
+  );
+  if (!value.isValid) {
+    return null;
+  }
+  return value.toJSDate();
+};
+
 const parseTimedDueDate = (task: ITodoistTask): Date | null => {
   const datetime = String(task.due?.datetime ?? "").trim();
   if (datetime) {
@@ -178,7 +234,45 @@ const formatTaskDueLabel = (task: ITodoistTask): string => {
   }
 
   const dueYmd = extractYmd(dueDate);
+  if (dueYmd) {
+    const dueTime = parseDueTimeFromNaturalLanguage(String(task.due?.string ?? ""));
+    if (dueTime) {
+      const parsed = parseEtDateTime(dueYmd, dueTime.hour, dueTime.minute, 0);
+      if (parsed) {
+        return formatMonthDayTimeInEt(parsed);
+      }
+    }
+  }
+
   return formatMonthDayFromYmd(dueYmd || dueDate);
+};
+
+const getTaskDueSortValue = (task: ITodoistTask): number => {
+  const timedDue = parseTimedDueDate(task);
+  if (timedDue) {
+    return timedDue.getTime();
+  }
+
+  const dueDate = String(task.due?.date ?? "");
+  const dueYmd = extractYmd(dueDate);
+  if (!dueYmd) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  const dueTime = parseDueTimeFromNaturalLanguage(String(task.due?.string ?? ""));
+  if (dueTime) {
+    const parsedTimed = parseEtDateTime(dueYmd, dueTime.hour, dueTime.minute, 0);
+    if (parsedTimed) {
+      return parsedTimed.getTime();
+    }
+  }
+
+  const parsedDayEnd = parseEtDateTime(dueYmd, 23, 59, 59);
+  if (parsedDayEnd) {
+    return parsedDayEnd.getTime();
+  }
+
+  return Number.MAX_SAFE_INTEGER;
 };
 
 const formatYmdInTimezone = (date: Date, timezone: string): string => {
@@ -423,10 +517,8 @@ const getOrCreateSection = (
 };
 
 const sortPreparedTasks = (a: IPreparedTodoTask, b: IPreparedTodoTask): number => {
-  const aHasDue = a.dueLabel.length > 0;
-  const bHasDue = b.dueLabel.length > 0;
-  if (aHasDue !== bHasDue) {
-    return aHasDue ? -1 : 1;
+  if (a.dueSortValue !== b.dueSortValue) {
+    return a.dueSortValue - b.dueSortValue;
   }
   return a.order - b.order || a.text.localeCompare(b.text);
 };
@@ -589,6 +681,7 @@ const buildTodoListData = (
     preparedTasks.push({
       completableId: taskId,
       dueLabel,
+      dueSortValue: getTaskDueSortValue(task),
       depth: 0,
       id: taskId || `${sectionId}:${preparedTasks.length}:${text}`,
       text,
@@ -908,6 +1001,7 @@ export const MIKE_TODO_COMPLETE_SELECT_REGEX = /^mike-todo-complete:[^:]+$/;
 export const __mikeTodoListTestables = {
   filterVisibleTasks,
   formatTaskDueLabel,
+  getTaskDueSortValue,
   isValidYmd,
   shouldRenderTask,
 };

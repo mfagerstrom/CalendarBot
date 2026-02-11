@@ -179,4 +179,43 @@ describe("mikeTodoListService due label formatting", () => {
 
     assert.equal(label, "02/11 3:00pm");
   });
+
+  it("renders a time when due.string includes time and due.date is date-only", () => {
+    const label = __mikeTodoListTestables.formatTaskDueLabel(
+      buildTask({
+        due: {
+          date: "2026-02-12",
+          is_recurring: true,
+          string: "every day at 7:55 AM",
+        },
+      }),
+    );
+
+    assert.equal(label, "02/12 7:55am");
+  });
+});
+
+describe("mikeTodoListService due sort value", () => {
+  it("sorts timed tasks before all-day tasks on the same date", () => {
+    const timedSort = __mikeTodoListTestables.getTaskDueSortValue(
+      buildTask({
+        due: {
+          date: "2026-02-12",
+          is_recurring: true,
+          string: "every day at 1:00 PM",
+        },
+      }),
+    );
+    const allDaySort = __mikeTodoListTestables.getTaskDueSortValue(
+      buildTask({
+        due: {
+          date: "2026-02-12",
+          is_recurring: true,
+          string: "every day",
+        },
+      }),
+    );
+
+    assert.ok(timedSort < allDaySort);
+  });
 });
