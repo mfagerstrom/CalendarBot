@@ -710,6 +710,27 @@ const markCompleted = async (occurrenceId: number): Promise<void> => {
   );
 };
 
+const clearPromptMessageId = async (occurrenceId: number): Promise<void> => {
+  await query(
+    `
+      UPDATE CALENDAR_ReminderOccurrences
+      SET prompt_message_id = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = :id
+    `,
+    { id: occurrenceId },
+  );
+};
+
+const isDiscordUnknownMessageError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const code = (error as { code?: unknown }).code;
+  return Number(code) === 10008;
+};
+
 export const snoozeOccurrence = async (occurrenceId: number): Promise<void> => {
   await query(
     `
@@ -970,6 +991,15 @@ export const refreshActiveReminderMessages = async (client: Client): Promise<voi
         flags: MessageFlags.IsComponentsV2,
       });
     } catch (err) {
+      if (isDiscordUnknownMessageError(err)) {
+        console.warn(
+          `[Reminder] prompt message missing; clearing stale reference `
+          + `(occurrenceId=${occurrence.id}, channelId=${CHANNELS.CALENDAR_REMINDERS}, `
+          + `messageId=${occurrence.promptMessageId}).`,
+        );
+        await clearPromptMessageId(occurrence.id);
+        continue;
+      }
       console.error("Failed to refresh reminder message:", err);
     }
   }
