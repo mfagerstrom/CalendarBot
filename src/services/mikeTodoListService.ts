@@ -42,6 +42,11 @@ interface ITodoistTask {
   section_id?: string;
 }
 
+interface ITaskRenderRange {
+  endYmd?: string;
+  startYmd: string;
+}
+
 interface ITodoistCollaborator {
   id?: string | number;
   name?: string;
@@ -182,18 +187,71 @@ const getDueYmd = (task: ITodoistTask): string => {
   return formatYmdInTimezone(parsed, REMINDER_TIMEZONE);
 };
 
-const shouldRenderTask = (task: ITodoistTask): boolean => {
-  const todayYmd = formatYmdInTimezone(new Date(), REMINDER_TIMEZONE);
+const isValidYmd = (ymd: string): boolean => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+    return false;
+  }
+  const parsed = new Date(`${ymd}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return false;
+  }
+  return parsed.toISOString().startsWith(`${ymd}T`);
+};
+
+const isYmdInRenderRange = (dueYmd: string, range: ITaskRenderRange): boolean => {
+  if (!isValidYmd(dueYmd)) {
+    return false;
+  }
+  if (dueYmd < range.startYmd) {
+    return false;
+  }
+  if (range.endYmd && dueYmd > range.endYmd) {
+    return false;
+  }
+  return true;
+};
+
+const shouldRenderTask = (task: ITodoistTask, range: ITaskRenderRange): boolean => {
   const dueYmd = getDueYmd(task);
   if (!dueYmd) {
+    if (task.due?.is_recurring) {
+      console.error("[MikeTodoList] Skipping recurring task with invalid recurrence metadata:", {
+        due: task.due ?? null,
+        id: String(task.id ?? ""),
+        text: String(task.content ?? ""),
+      });
+      return false;
+    }
     return true;
   }
 
-  if (task.due?.is_recurring) {
-    return dueYmd === todayYmd;
+  return isYmdInRenderRange(dueYmd, range);
+};
+
+const filterVisibleTasks = (
+  tasks: ITodoistTask[],
+  range: ITaskRenderRange,
+): ITodoistTask[] => {
+  const seenIds = new Set<string>();
+  const visible: ITodoistTask[] = [];
+
+  for (const task of tasks) {
+    const taskId = String(task.id ?? "").trim();
+    if (taskId && seenIds.has(taskId)) {
+      continue;
+    }
+
+    if (!shouldRenderTask(task, range)) {
+      continue;
+    }
+
+    if (taskId) {
+      seenIds.add(taskId);
+    }
+    visible.push(task);
   }
 
-  return dueYmd >= todayYmd;
+  return visible;
 };
 
 const getTodoistAuthHeaders = (): Record<string, string> => {
@@ -550,7 +608,8 @@ const getMikeTodoListData = async (): Promise<IMikeTodoListData> => {
     listProjectCollaborators(projectId),
   ]);
 
-  const visibleTasks = activeTasks.filter((task) => shouldRenderTask(task));
+  const todayYmd = formatYmdInTimezone(new Date(), REMINDER_TIMEZONE);
+  const visibleTasks = filterVisibleTasks(activeTasks, { startYmd: todayYmd });
   return buildTodoListData(project, sections, visibleTasks, collaborators);
 };
 
@@ -795,6 +854,12 @@ export const completeMikeTodoTask = async (
 };
 
 export const MIKE_TODO_COMPLETE_SELECT_REGEX = /^mike-todo-complete:[^:]+$/;
+
+export const __mikeTodoListTestables = {
+  filterVisibleTasks,
+  isValidYmd,
+  shouldRenderTask,
+};
 
 export const startMikeTodoListSyncService = (client: Client, channelId: string): void => {
   if (todoTimer) {

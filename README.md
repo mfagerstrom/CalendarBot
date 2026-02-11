@@ -11,7 +11,6 @@ CalendarBot is a private Discord bot for my family of six to coordinate calendar
 
 ## User Commands
 - `/today` List all events occurring today across your selected calendars
-- `/todo` List and manage GitHub issues for the project
 
 ## Setup
 1. Create a Discord application and add the bot to your guild.

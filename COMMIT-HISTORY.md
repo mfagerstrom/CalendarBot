@@ -1,5 +1,6 @@
 # Commit History
 Last synced: 2026-02-11 (session sync)
+- 2026-02-11: f7feb35 fix: converted commands to be global
 - 2026-02-11: da51090 fixed bad todoist api calls
 - 2026-02-11: e7eb9e9 fixed bad todoist api calls
 - 2026-02-11: 2213d22 fixed bad todoist api calls
