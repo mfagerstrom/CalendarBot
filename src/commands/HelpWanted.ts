@@ -25,7 +25,7 @@ import {
   safeDeferReply,
   safeReply,
 } from "../lib/discord/interactionUtils.js";
-import { CHANNELS } from "../config/channels.js";
+import { getGuildChannelId } from "../services/guildChannelConfigService.js";
 import { buildSimpleTextContainer } from "../services/eventUiService.js";
 
 const HELP_COMPLETE_MODAL_PREFIX = "help-complete-modal";
@@ -67,7 +67,12 @@ export class HelpWantedCommand {
     originalRequestDescription: string,
     completionDescription: string,
   ): Promise<void> {
-    const channel = await interaction.client.channels.fetch(CHANNELS.HELP_WANTED_TALK);
+    const guildId = interaction.guildId;
+    if (!guildId) {
+      return;
+    }
+    const talkChannelId = await getGuildChannelId(guildId, "HELP_WANTED_TALK");
+    const channel = await interaction.client.channels.fetch(talkChannelId);
     if (!channel || !channel.isTextBased()) {
       return;
     }
@@ -130,6 +135,14 @@ export class HelpWantedCommand {
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: buildComponentsV2Flags(true) });
+    if (!interaction.guildId) {
+      const payload = buildSimpleTextContainer("This command can only be used in a server.");
+      await safeReply(interaction, {
+        components: [payload],
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
 
     const normalizedDescription = description.replace(/\s+/g, " ").trim();
     if (!normalizedDescription) {
@@ -150,7 +163,8 @@ export class HelpWantedCommand {
       requesterLabel,
     );
 
-    await ensureHelpWantedMessage(interaction.client as any, CHANNELS.HELP_WANTED);
+    const helpWantedChannelId = await getGuildChannelId(interaction.guildId, "HELP_WANTED");
+    await ensureHelpWantedMessage(interaction.client as any, helpWantedChannelId);
 
     const successPayload = buildSimpleTextContainer("Your help request has been posted.");
     await safeReply(interaction, {
@@ -173,9 +187,18 @@ export class HelpWantedCommand {
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: buildComponentsV2Flags(true) });
+    if (!interaction.guildId) {
+      const payload = buildSimpleTextContainer("This command can only be used in a server.");
+      await safeReply(interaction, {
+        components: [payload],
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
 
     await removeHelpWantedRequest(taskId);
-    await ensureHelpWantedMessage(interaction.client as any, CHANNELS.HELP_WANTED);
+    const helpWantedChannelId = await getGuildChannelId(interaction.guildId, "HELP_WANTED");
+    await ensureHelpWantedMessage(interaction.client as any, helpWantedChannelId);
 
     const payload = buildSimpleTextContainer("Help request marked as done.");
     await safeReply(interaction, {
@@ -276,7 +299,11 @@ export class HelpWantedCommand {
       completionDescription,
     });
     await removeHelpWantedRequest(request.id);
-    await ensureHelpWantedMessage(interaction.client as any, CHANNELS.HELP_WANTED);
+    if (!interaction.guildId) {
+      return;
+    }
+    const helpWantedChannelId = await getGuildChannelId(interaction.guildId, "HELP_WANTED");
+    await ensureHelpWantedMessage(interaction.client as any, helpWantedChannelId);
     await this.sendHelpCompletionAnnouncement(
       interaction,
       request.requesterId,

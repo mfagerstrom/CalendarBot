@@ -63,9 +63,11 @@ interface IGroceryListData {
   sourceUpdatedBy?: string;
 }
 
+type ChannelResolver = string | (() => Promise<string[]>);
+
 let groceryTimer: NodeJS.Timeout | null = null;
-let grocerySyncInProgress = false;
-let lastPayloadFingerprint = "";
+const grocerySyncInProgress = new Set<string>();
+const lastPayloadFingerprintByChannel = new Map<string, string>();
 let cachedProjectId = TODOIST_CONFIG.groceryProjectId;
 
 const todoistClient = axios.create({
@@ -565,7 +567,8 @@ const updateGroceryListMessage = async (client: Client, channelId: string): Prom
   }
 
   const fingerprint = buildFingerprint(listData);
-  if (fingerprint === lastPayloadFingerprint) {
+  const previousFingerprint = lastPayloadFingerprintByChannel.get(channelId) ?? "";
+  if (fingerprint === previousFingerprint) {
     return;
   }
 
@@ -578,36 +581,47 @@ const updateGroceryListMessage = async (client: Client, channelId: string): Prom
     components: payload,
     flags: MessageFlags.IsComponentsV2,
   });
-  lastPayloadFingerprint = fingerprint;
+  lastPayloadFingerprintByChannel.set(channelId, fingerprint);
 };
 
 export const runGroceryListSync = async (
   client: Client,
   channelId: string,
 ): Promise<void> => {
-  if (grocerySyncInProgress) {
+  if (grocerySyncInProgress.has(channelId)) {
     return;
   }
 
-  grocerySyncInProgress = true;
+  grocerySyncInProgress.add(channelId);
   try {
     await updateGroceryListMessage(client, channelId);
   } finally {
-    grocerySyncInProgress = false;
+    grocerySyncInProgress.delete(channelId);
   }
 };
 
 export const startGroceryListSyncService = (
   client: Client,
-  channelId: string,
+  channelResolver: ChannelResolver,
 ): void => {
   if (groceryTimer) {
     return;
   }
 
+  const resolveChannels = async (): Promise<string[]> => {
+    if (typeof channelResolver === "string") {
+      return [channelResolver];
+    }
+    const ids = await channelResolver();
+    return Array.from(new Set(ids.filter(Boolean)));
+  };
+
   const run = async (): Promise<void> => {
     try {
-      await runGroceryListSync(client, channelId);
+      const channelIds = await resolveChannels();
+      for (const channelId of channelIds) {
+        await runGroceryListSync(client, channelId);
+      }
     } catch (err) {
       console.error("[GroceryList] Sync loop failed:", err);
     }

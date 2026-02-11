@@ -1,7 +1,6 @@
 import type { StringSelectMenuInteraction } from "discord.js";
 import type { Client } from "discordx";
 import { Discord, SelectMenuComponent } from "discordx";
-import { CHANNELS } from "../config/channels.js";
 import {
   MIKE_TODO_COMPLETE_SELECT_REGEX,
   completeMikeTodoTask,
@@ -12,6 +11,7 @@ import {
   safeReply,
 } from "../lib/discord/interactionUtils.js";
 import { buildSimpleTextContainer } from "../services/eventUiService.js";
+import { getGuildChannelId } from "../services/guildChannelConfigService.js";
 
 @Discord()
 export class MikeTodoInteractions {
@@ -29,9 +29,18 @@ export class MikeTodoInteractions {
     await safeDeferReply(interaction, { flags: buildComponentsV2Flags(true) });
 
     try {
+      if (!interaction.guildId) {
+        await safeReply(interaction, {
+          components: [buildSimpleTextContainer("This action must be used inside a server.")],
+          flags: buildComponentsV2Flags(true),
+        });
+        return;
+      }
+
+      const todoChannelId = await getGuildChannelId(interaction.guildId, "TODO_LIST");
       await completeMikeTodoTask(
         interaction.client as unknown as Client,
-        CHANNELS.TODO_LIST,
+        todoChannelId,
         taskId,
       );
       await safeReply(interaction, {

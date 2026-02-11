@@ -30,7 +30,7 @@ import {
   safeReply,
   safeUpdate,
 } from "../lib/discord/interactionUtils.js";
-import { CHANNELS } from "../config/channels.js";
+import { getGuildChannelId } from "../services/guildChannelConfigService.js";
 import {
   ARRANGEMENT_QUEUE_COMPLETE_MODAL_REGEX,
   ARRANGEMENT_QUEUE_COMPLETE_SELECT_ID,
@@ -181,7 +181,12 @@ export class ReminderInteractions {
     const rule = rules.find((item) => item.id === occurrence.ruleId);
     occurrence.arrangementsNotes = arrangementsNotes;
 
-    const channel = await interaction.client.channels.fetch(CHANNELS.CALENDAR_REMINDERS);
+    const guildId = interaction.guildId;
+    if (!guildId) {
+      return;
+    }
+    const reminderChannelId = await getGuildChannelId(guildId, "CALENDAR_REMINDERS");
+    const channel = await interaction.client.channels.fetch(reminderChannelId);
     if (channel && channel.isTextBased() && occurrence.promptMessageId) {
       try {
         const message = await (channel as any).messages.fetch(occurrence.promptMessageId);
@@ -194,7 +199,8 @@ export class ReminderInteractions {
       }
     }
 
-    await ensureArrangementQueueMessage(interaction.client as any, CHANNELS.ARRANGEMENTS_QUEUE);
+    const arrangementChannelId = await getGuildChannelId(guildId, "ARRANGEMENTS_QUEUE");
+    await ensureArrangementQueueMessage(interaction.client as any, arrangementChannelId);
 
     const payload = buildReminderPromptUpdate("Arrangements notes saved.");
     await safeReply(interaction, {
@@ -233,7 +239,12 @@ export class ReminderInteractions {
     const rule = rules.find((item) => item.id === occurrence.ruleId);
     occurrence.arrangementsNotes = arrangementsNotes;
 
-    const channel = await interaction.client.channels.fetch(CHANNELS.CALENDAR_REMINDERS);
+    const guildId = interaction.guildId;
+    if (!guildId) {
+      return;
+    }
+    const reminderChannelId = await getGuildChannelId(guildId, "CALENDAR_REMINDERS");
+    const channel = await interaction.client.channels.fetch(reminderChannelId);
     if (channel && channel.isTextBased() && occurrence.promptMessageId) {
       try {
         const message = await (channel as any).messages.fetch(occurrence.promptMessageId);
@@ -246,7 +257,8 @@ export class ReminderInteractions {
       }
     }
 
-    await ensureArrangementQueueMessage(interaction.client as any, CHANNELS.ARRANGEMENTS_QUEUE);
+    const arrangementChannelId = await getGuildChannelId(guildId, "ARRANGEMENTS_QUEUE");
+    await ensureArrangementQueueMessage(interaction.client as any, arrangementChannelId);
 
     const payload = buildReminderPromptUpdate("Arrangements saved.");
     await safeReply(interaction, {
@@ -354,13 +366,19 @@ export class ReminderInteractions {
     const rawNotes = interaction.fields.getTextInputValue("arrangements-notes");
     const arrangementsNotes = rawNotes.replace(/\s+/g, " ").trim();
     await completeOccurrenceWithArrangements(occurrenceId, arrangementsNotes);
-    await ensureArrangementQueueMessage(interaction.client as any, CHANNELS.ARRANGEMENTS_QUEUE);
+    const guildId = interaction.guildId;
+    if (!guildId) {
+      return;
+    }
+    const arrangementChannelId = await getGuildChannelId(guildId, "ARRANGEMENTS_QUEUE");
+    await ensureArrangementQueueMessage(interaction.client as any, arrangementChannelId);
 
     const rules = await getReminderRules();
     const rule = rules.find((item) => item.id === occurrence.ruleId);
     occurrence.arrangementsNotes = arrangementsNotes;
 
-    const channel = await interaction.client.channels.fetch(CHANNELS.CALENDAR_REMINDERS);
+    const reminderChannelId = await getGuildChannelId(guildId, "CALENDAR_REMINDERS");
+    const channel = await interaction.client.channels.fetch(reminderChannelId);
     if (channel && channel.isTextBased() && occurrence.promptMessageId) {
       try {
         const message = await (channel as any).messages.fetch(occurrence.promptMessageId);
@@ -405,13 +423,19 @@ export class ReminderInteractions {
     const rawNotes = interaction.fields.getTextInputValue("arrangements-notes");
     const arrangementsNotes = rawNotes.replace(/\s+/g, " ").trim();
     await updateOccurrenceArrangementsNotes(occurrenceId, arrangementsNotes);
-    await ensureArrangementQueueMessage(interaction.client as any, CHANNELS.ARRANGEMENTS_QUEUE);
+    const guildId = interaction.guildId;
+    if (!guildId) {
+      return;
+    }
+    const arrangementChannelId = await getGuildChannelId(guildId, "ARRANGEMENTS_QUEUE");
+    await ensureArrangementQueueMessage(interaction.client as any, arrangementChannelId);
 
     const rules = await getReminderRules();
     const rule = rules.find((item) => item.id === occurrence.ruleId);
     occurrence.arrangementsNotes = arrangementsNotes;
 
-    const channel = await interaction.client.channels.fetch(CHANNELS.CALENDAR_REMINDERS);
+    const reminderChannelId = await getGuildChannelId(guildId, "CALENDAR_REMINDERS");
+    const channel = await interaction.client.channels.fetch(reminderChannelId);
     if (channel && channel.isTextBased() && occurrence.promptMessageId) {
       try {
         const message = await (channel as any).messages.fetch(occurrence.promptMessageId);

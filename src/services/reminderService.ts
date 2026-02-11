@@ -1,5 +1,4 @@
 import { query } from "../lib/db/oracle.js";
-import { CHANNELS } from "../config/channels.js";
 import { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder } from "@discordjs/builders";
 import { SeparatorSpacingSize } from "discord-api-types/v10";
 import { ActionRowBuilder, ButtonBuilder } from "@discordjs/builders";
@@ -915,7 +914,10 @@ const buildAcknowledgedComponents = (message: string): { components: ContainerBu
   return { components: [container] };
 };
 
-export const processReminders = async (client: Client): Promise<void> => {
+export const processReminders = async (
+  client: Client,
+  channelId: string,
+): Promise<void> => {
   const rules = await getReminderRules();
   await deleteOccurrencesForMissingRules();
   if (!rules.length) return;
@@ -925,7 +927,7 @@ export const processReminders = async (client: Client): Promise<void> => {
   const dueOccurrences = await fetchDueOccurrences();
   if (!dueOccurrences.length) return;
 
-  const channel = await client.channels.fetch(CHANNELS.CALENDAR_REMINDERS);
+  const channel = await client.channels.fetch(channelId);
   if (!channel || !channel.isTextBased()) {
     return;
   }
@@ -946,11 +948,14 @@ export const processReminders = async (client: Client): Promise<void> => {
   }
 };
 
-export const refreshActiveReminderMessages = async (client: Client): Promise<void> => {
+export const refreshActiveReminderMessages = async (
+  client: Client,
+  channelId: string,
+): Promise<void> => {
   const occurrences = await fetchActivePromptOccurrences();
   if (!occurrences.length) return;
 
-  const channel = await client.channels.fetch(CHANNELS.CALENDAR_REMINDERS);
+  const channel = await client.channels.fetch(channelId);
   if (!channel || !channel.isTextBased()) {
     return;
   }

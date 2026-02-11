@@ -85,9 +85,11 @@ interface ISectionTaskOption {
   value: string;
 }
 
+type ChannelResolver = string | (() => Promise<string[]>);
+
 let todoTimer: NodeJS.Timeout | null = null;
-let todoSyncInProgress = false;
-let lastPayloadFingerprint = "";
+const todoSyncInProgress = new Set<string>();
+const lastPayloadFingerprintByChannel = new Map<string, string>();
 
 const todoistClient = axios.create({
   baseURL: TODOIST_API_BASE_URL,
@@ -749,7 +751,8 @@ const updateTodoListMessage = async (client: Client, channelId: string): Promise
   }
 
   const fingerprint = buildFingerprint(listData);
-  if (fingerprint === lastPayloadFingerprint) {
+  const previousFingerprint = lastPayloadFingerprintByChannel.get(channelId) ?? "";
+  if (fingerprint === previousFingerprint) {
     return;
   }
 
@@ -759,19 +762,19 @@ const updateTodoListMessage = async (client: Client, channelId: string): Promise
     components: payload,
     flags: MessageFlags.IsComponentsV2,
   });
-  lastPayloadFingerprint = fingerprint;
+  lastPayloadFingerprintByChannel.set(channelId, fingerprint);
 };
 
 export const runMikeTodoListSync = async (client: Client, channelId: string): Promise<void> => {
-  if (todoSyncInProgress) {
+  if (todoSyncInProgress.has(channelId)) {
     return;
   }
 
-  todoSyncInProgress = true;
+  todoSyncInProgress.add(channelId);
   try {
     await updateTodoListMessage(client, channelId);
   } finally {
-    todoSyncInProgress = false;
+    todoSyncInProgress.delete(channelId);
   }
 };
 
@@ -790,20 +793,34 @@ export const completeMikeTodoTask = async (
     { headers: getTodoistAuthHeaders() },
   );
 
-  lastPayloadFingerprint = "";
+  lastPayloadFingerprintByChannel.delete(channelId);
   await updateTodoListMessage(client, channelId);
 };
 
 export const MIKE_TODO_COMPLETE_SELECT_REGEX = /^mike-todo-complete:[^:]+$/;
 
-export const startMikeTodoListSyncService = (client: Client, channelId: string): void => {
+export const startMikeTodoListSyncService = (
+  client: Client,
+  channelResolver: ChannelResolver,
+): void => {
   if (todoTimer) {
     return;
   }
 
+  const resolveChannels = async (): Promise<string[]> => {
+    if (typeof channelResolver === "string") {
+      return [channelResolver];
+    }
+    const ids = await channelResolver();
+    return Array.from(new Set(ids.filter(Boolean)));
+  };
+
   const run = async (): Promise<void> => {
     try {
-      await runMikeTodoListSync(client, channelId);
+      const channelIds = await resolveChannels();
+      for (const channelId of channelIds) {
+        await runMikeTodoListSync(client, channelId);
+      }
     } catch (err) {
       console.error("[MikeTodoList] Sync loop failed:", err);
     }

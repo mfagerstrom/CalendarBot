@@ -10,7 +10,6 @@ import {
     getYmdInTimezone,
     toAllDayEventForYmd,
 } from "./eventDateUtils.js";
-import { CHANNELS } from "../config/channels.js";
 import { Client } from "discordx";
 import { applyReminderFlags, getReminderRules } from "./reminderService.js";
 
@@ -255,7 +254,7 @@ export const updateUserTodayMessages = async (userId: string, client: Client) =>
                     `[LiveUpdate] Removed stale Today registration for user ${userId} in channel ${row.CHANNEL_ID}.`,
                 );
 
-                if (err?.code === 10008 && row.CHANNEL_ID === CHANNELS.TODAY) {
+                if (err?.code === 10008) {
                     try {
                         await ensureStaticTodayMessage(client, userId, row.CHANNEL_ID);
                         console.log(

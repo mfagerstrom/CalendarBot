@@ -1,12 +1,6 @@
 import { Client } from "discordx";
 import { Message } from "discord.js";
-import { CHANNELS } from "../config/channels.js";
-
-const RESTRICTED_CHANNEL_IDS = new Set<string>([
-    CHANNELS.TODAY,
-    CHANNELS.THIS_WEEK,
-    CHANNELS.GROCERY_LIST,
-]);
+import { getGuildChannelId } from "./guildChannelConfigService.js";
 
 const NO_CHAT_DM_REMINDER = [
     "Your message was removed because that channel is read-only.",
@@ -33,7 +27,23 @@ const handleRestrictedChannelMessage = async (
         return;
     }
 
-    if (!message.guildId || !RESTRICTED_CHANNEL_IDS.has(message.channelId)) {
+    if (!message.guildId) {
+        return;
+    }
+
+    const [todayChannelId, weekChannelId, groceryChannelId, calendarChatChannelId] = await Promise.all([
+        getGuildChannelId(message.guildId, "TODAY"),
+        getGuildChannelId(message.guildId, "THIS_WEEK"),
+        getGuildChannelId(message.guildId, "GROCERY_LIST"),
+        getGuildChannelId(message.guildId, "CALENDAR_CHAT"),
+    ]);
+
+    const restrictedChannelIds = new Set<string>([
+        todayChannelId,
+        weekChannelId,
+        groceryChannelId,
+    ]);
+    if (!restrictedChannelIds.has(message.channelId)) {
         return;
     }
 
@@ -53,7 +63,7 @@ const handleRestrictedChannelMessage = async (
     }
 
     try {
-        const calendarChatChannel = await client.channels.fetch(CHANNELS.CALENDAR_CHAT);
+        const calendarChatChannel = await client.channels.fetch(calendarChatChannelId);
         if (!calendarChatChannel || !calendarChatChannel.isTextBased()) {
             return;
         }

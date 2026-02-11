@@ -5,7 +5,6 @@ import {
     forceUpdateAllWeekMessages,
     ensureStaticWeekMessages,
 } from "./weekService.js";
-import { CHANNELS } from "../config/channels.js";
 import { USERS } from "../config/users.js";
 import { Client } from "discordx";
 import { processReminders, refreshActiveReminderMessages } from "./reminderService.js";
@@ -13,12 +12,34 @@ import { ensureHelpWantedMessage } from "./helpWantedService.js";
 import { ensureArrangementQueueMessage } from "./arrangementQueueService.js";
 import { startGroceryListSyncService } from "./groceryListService.js";
 import { startMikeTodoListSyncService } from "./mikeTodoListService.js";
+import { getGuildChannelId, listKnownGuildIds } from "./guildChannelConfigService.js";
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 let lastCheckedDate = new Date().toDateString();
 
 export const startCalendarSyncService = (client: Client) => {
     console.log("Starting Calendar Sync Service...");
+
+    const syncStaticGuildContent = async (): Promise<void> => {
+        const guildIds = await listKnownGuildIds(client);
+        for (const guildId of guildIds) {
+            try {
+                const todayChannelId = await getGuildChannelId(guildId, "TODAY");
+                const weekChannelId = await getGuildChannelId(guildId, "THIS_WEEK");
+                const helpWantedChannelId = await getGuildChannelId(guildId, "HELP_WANTED");
+                const arrangementQueueChannelId = await getGuildChannelId(guildId, "ARRANGEMENTS_QUEUE");
+                const reminderChannelId = await getGuildChannelId(guildId, "CALENDAR_REMINDERS");
+
+                await ensureStaticTodayMessage(client, USERS.MIKE, todayChannelId);
+                await ensureStaticWeekMessages(client, USERS.MIKE, weekChannelId);
+                await ensureHelpWantedMessage(client, helpWantedChannelId);
+                await ensureArrangementQueueMessage(client, arrangementQueueChannelId);
+                await refreshActiveReminderMessages(client, reminderChannelId);
+            } catch (err) {
+                console.error(`Failed to ensure static content for guild ${guildId}:`, err);
+            }
+        }
+    };
 
     const runSync = async () => {
         try {
@@ -32,15 +53,7 @@ export const startCalendarSyncService = (client: Client) => {
                 lastCheckedDate = currentDate;
             }
 
-            // 2. Ensure Static Channel (Single Copy)
-            try {
-                // Ensure MIKE's calendar is in the TODAY channel
-                await ensureStaticTodayMessage(client, USERS.MIKE, CHANNELS.TODAY);
-                await ensureStaticWeekMessages(client, USERS.MIKE, CHANNELS.THIS_WEEK);
-                await ensureHelpWantedMessage(client, CHANNELS.HELP_WANTED);
-            } catch (err) {
-                console.error("Failed to ensure static calendar messages:", err);
-            }
+            await syncStaticGuildContent();
 
             // 3. Standard Sync Loop
             const allSelections = await getAllUserCalendarSelections();
@@ -75,8 +88,20 @@ export const startCalendarSyncService = (client: Client) => {
                 await updateUserWeekMessages(userId, client);
             }
 
-            await processReminders(client);
-            await ensureArrangementQueueMessage(client, CHANNELS.ARRANGEMENTS_QUEUE);
+            const guildIds = await listKnownGuildIds(client);
+            for (const guildId of guildIds) {
+                try {
+                    const reminderChannelId = await getGuildChannelId(guildId, "CALENDAR_REMINDERS");
+                    const arrangementQueueChannelId = await getGuildChannelId(
+                        guildId,
+                        "ARRANGEMENTS_QUEUE",
+                    );
+                    await processReminders(client, reminderChannelId);
+                    await ensureArrangementQueueMessage(client, arrangementQueueChannelId);
+                } catch (err) {
+                    console.error(`Failed reminder/arrangement sync for guild ${guildId}:`, err);
+                }
+            }
 
             if (calendarsWithChanges > 0) {
                 console.log(
@@ -91,10 +116,23 @@ export const startCalendarSyncService = (client: Client) => {
 
     const runStartup = async () => {
         try {
-            await ensureArrangementQueueMessage(client, CHANNELS.ARRANGEMENTS_QUEUE);
-            await refreshActiveReminderMessages(client);
-            startGroceryListSyncService(client, CHANNELS.GROCERY_LIST);
-            startMikeTodoListSyncService(client, CHANNELS.TODO_LIST);
+            await syncStaticGuildContent();
+
+            startGroceryListSyncService(client, async () => {
+                const guildIds = await listKnownGuildIds(client);
+                const channelIds = await Promise.all(
+                    guildIds.map((guildId) => getGuildChannelId(guildId, "GROCERY_LIST")),
+                );
+                return Array.from(new Set(channelIds.filter(Boolean)));
+            });
+
+            startMikeTodoListSyncService(client, async () => {
+                const guildIds = await listKnownGuildIds(client);
+                const channelIds = await Promise.all(
+                    guildIds.map((guildId) => getGuildChannelId(guildId, "TODO_LIST")),
+                );
+                return Array.from(new Set(channelIds.filter(Boolean)));
+            });
         } catch (err) {
             console.error("Failed to run startup refresh tasks:", err);
         }

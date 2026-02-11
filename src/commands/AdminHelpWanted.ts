@@ -2,7 +2,7 @@ import { ApplicationCommandOptionType, CommandInteraction, Role, User } from "di
 import { Discord, Slash, SlashGroup, SlashOption } from "discordx";
 import { addHelpWantedRequest, ensureHelpWantedMessage } from "../services/helpWantedService.js";
 import { buildComponentsV2Flags, safeDeferReply, safeReply } from "../lib/discord/interactionUtils.js";
-import { CHANNELS } from "../config/channels.js";
+import { getGuildChannelId } from "../services/guildChannelConfigService.js";
 import { buildSimpleTextContainer } from "../services/eventUiService.js";
 
 @Discord()
@@ -51,6 +51,14 @@ export class AdminHelpWantedCommand {
     interaction: CommandInteraction,
   ): Promise<void> {
     await safeDeferReply(interaction, { flags: buildComponentsV2Flags(true) });
+    if (!interaction.guildId) {
+      const payload = buildSimpleTextContainer("This command can only be used in a server.");
+      await safeReply(interaction, {
+        components: [payload],
+        flags: buildComponentsV2Flags(true),
+      });
+      return;
+    }
 
     const normalizedDescription = description.replace(/\s+/g, " ").trim();
     if (!normalizedDescription) {
@@ -69,7 +77,8 @@ export class AdminHelpWantedCommand {
       roleIds,
       requesterLabel,
     );
-    await ensureHelpWantedMessage(interaction.client as any, CHANNELS.HELP_WANTED);
+    const helpWantedChannelId = await getGuildChannelId(interaction.guildId, "HELP_WANTED");
+    await ensureHelpWantedMessage(interaction.client as any, helpWantedChannelId);
 
     const successPayload = buildSimpleTextContainer("Help request seeded.");
     await safeReply(interaction, {

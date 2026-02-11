@@ -14,10 +14,12 @@ import {
 import { buildComponentsV2Flags, safeDeferReply, safeReply } from "../lib/discord/interactionUtils.js";
 import { forceUpdateAllTodayMessages } from "../services/todayService.js";
 import { forceUpdateAllWeekMessages } from "../services/weekService.js";
+import { getGuildChannelId } from "../services/guildChannelConfigService.js";
 
-const refreshReminderViews = async (client: Client): Promise<void> => {
+const refreshReminderViews = async (client: Client, guildId: string): Promise<void> => {
   try {
-    await processReminders(client);
+    const reminderChannelId = await getGuildChannelId(guildId, "CALENDAR_REMINDERS");
+    await processReminders(client, reminderChannelId);
     await forceUpdateAllTodayMessages(client);
     await forceUpdateAllWeekMessages(client);
   } catch (err: any) {
@@ -115,7 +117,9 @@ export class AdminReminderCommand {
         components: payload.components,
         flags: buildComponentsV2Flags(true),
       });
-      void refreshReminderViews(interaction.client as Client);
+      if (interaction.guildId) {
+        void refreshReminderViews(interaction.client as Client, interaction.guildId);
+      }
     } catch (err: any) {
       console.error("Failed to add reminder rule:", err);
       const payload = buildRuleErrorComponents("Failed to add rule.");
@@ -169,7 +173,9 @@ export class AdminReminderCommand {
         components: payload.components,
         flags: buildComponentsV2Flags(true),
       });
-      void refreshReminderViews(interaction.client as Client);
+      if (interaction.guildId) {
+        void refreshReminderViews(interaction.client as Client, interaction.guildId);
+      }
     } catch (err: any) {
       console.error("Failed to remove reminder rule:", err);
       const payload = buildRuleErrorComponents("Failed to remove rule.");
