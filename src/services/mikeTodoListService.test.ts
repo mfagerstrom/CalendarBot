@@ -105,6 +105,24 @@ describe("mikeTodoListService recurring task rendering", () => {
     assert.equal(String(visible[0].id), "dedupe-id");
   });
 
+  it("includes non-recurring timed tasks when due.date includes a datetime payload", () => {
+    const start = "2026-02-11";
+    const tasks = [
+      buildTask({
+        due: {
+          date: "2026-02-11T20:00:00.000000Z",
+          datetime: "2026-02-11T20:00:00.000000Z",
+          is_recurring: false,
+        },
+        id: "timed-date-string",
+      }),
+    ];
+
+    const visible = __mikeTodoListTestables.filterVisibleTasks(tasks, { startYmd: start });
+    assert.equal(visible.length, 1);
+    assert.equal(String(visible[0].id), "timed-date-string");
+  });
+
   it("skips invalid recurring metadata and logs an error", () => {
     const today = "2026-02-11";
     const invalidRecurring = buildTask({

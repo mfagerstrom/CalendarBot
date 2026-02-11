@@ -1,5 +1,8 @@
 # Commit History
 Last synced: 2026-02-11 (session sync)
+- 2026-02-11: 1f27008 issue-24: rendered overdue tasks on mike todo
+- 2026-02-11: 9abba11 issue-23: corrected order of mike todo
+- 2026-02-11: 013901c issue-19: fixed recurring tasks not rendering on Mike TODO
 - 2026-02-11: f7feb35 fix: converted commands to be global
 - 2026-02-11: da51090 fixed bad todoist api calls
 - 2026-02-11: e7eb9e9 fixed bad todoist api calls

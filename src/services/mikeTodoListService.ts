@@ -121,6 +121,12 @@ const formatMonthDayFromYmd = (ymd: string): string => {
   return `${match[2]}/${match[3]}`;
 };
 
+const extractYmd = (value: string): string => {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : "";
+};
+
 const formatMonthDayTimeInEt = (date: Date): string => {
   const parts = new Intl.DateTimeFormat("en-US", {
     month: "2-digit",
@@ -153,7 +159,8 @@ const formatTaskDueLabel = (task: ITodoistTask): string => {
     return "";
   }
 
-  return formatMonthDayFromYmd(dueDate);
+  const dueYmd = extractYmd(dueDate);
+  return formatMonthDayFromYmd(dueYmd || dueDate);
 };
 
 const formatYmdInTimezone = (date: Date, timezone: string): string => {
@@ -172,7 +179,10 @@ const formatYmdInTimezone = (date: Date, timezone: string): string => {
 const getDueYmd = (task: ITodoistTask): string => {
   const dueDate = String(task.due?.date ?? "");
   if (dueDate) {
-    return dueDate;
+    const dueYmd = extractYmd(dueDate);
+    if (dueYmd) {
+      return dueYmd;
+    }
   }
 
   const dueDateTime = String(task.due?.datetime ?? "");
