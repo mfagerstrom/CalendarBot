@@ -144,15 +144,33 @@ const formatMonthDayTimeInEt = (date: Date): string => {
   return `${month}/${day} ${hour}:${minute}${dayPeriod}`.trim();
 };
 
+const parseTimedDueDate = (task: ITodoistTask): Date | null => {
+  const datetime = String(task.due?.datetime ?? "").trim();
+  if (datetime) {
+    const parsed = new Date(datetime);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed;
+    }
+  }
+
+  const dueDate = String(task.due?.date ?? "").trim();
+  if (!/[T ]\d{2}:\d{2}/.test(dueDate)) {
+    return null;
+  }
+
+  const parsed = new Date(dueDate);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+};
+
 const formatTaskDueLabel = (task: ITodoistTask): string => {
-  const dueDateTime = String(task.due?.datetime ?? "");
+  const timedDue = parseTimedDueDate(task);
   const dueDate = String(task.due?.date ?? "");
 
-  if (dueDateTime) {
-    const parsed = new Date(dueDateTime);
-    if (!Number.isNaN(parsed.getTime())) {
-      return formatMonthDayTimeInEt(parsed);
-    }
+  if (timedDue) {
+    return formatMonthDayTimeInEt(timedDue);
   }
 
   if (!dueDate) {
@@ -889,6 +907,7 @@ export const MIKE_TODO_COMPLETE_SELECT_REGEX = /^mike-todo-complete:[^:]+$/;
 
 export const __mikeTodoListTestables = {
   filterVisibleTasks,
+  formatTaskDueLabel,
   isValidYmd,
   shouldRenderTask,
 };

@@ -151,3 +151,32 @@ describe("mikeTodoListService recurring task rendering", () => {
     }
   });
 });
+
+describe("mikeTodoListService due label formatting", () => {
+  it("renders a time when due.datetime is present", () => {
+    const label = __mikeTodoListTestables.formatTaskDueLabel(
+      buildTask({
+        due: {
+          date: "2026-02-11",
+          datetime: "2026-02-11T20:00:00.000000Z",
+          is_recurring: false,
+        },
+      }),
+    );
+
+    assert.equal(label, "02/11 3:00pm");
+  });
+
+  it("renders a time when due.date carries datetime text but due.datetime is missing", () => {
+    const label = __mikeTodoListTestables.formatTaskDueLabel(
+      buildTask({
+        due: {
+          date: "2026-02-11T20:00:00.000000Z",
+          is_recurring: false,
+        },
+      }),
+    );
+
+    assert.equal(label, "02/11 3:00pm");
+  });
+});

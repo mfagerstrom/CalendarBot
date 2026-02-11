@@ -1,5 +1,6 @@
 # Commit History
 Last synced: 2026-02-11 (session sync)
+- 2026-02-11: 4c5848d issue-26: fixed missing tasks due to incorrect expectations of date shape
 - 2026-02-11: 1f27008 issue-24: rendered overdue tasks on mike todo
 - 2026-02-11: 9abba11 issue-23: corrected order of mike todo
 - 2026-02-11: 013901c issue-19: fixed recurring tasks not rendering on Mike TODO
