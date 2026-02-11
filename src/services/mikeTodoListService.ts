@@ -47,6 +47,10 @@ interface ITodoistCollaborator {
   name?: string;
 }
 
+interface ITodoistCollaboratorsResponseV1 {
+  results?: ITodoistCollaborator[];
+}
+
 interface ISectionSnapshot {
   completedItems: string[];
   name: string;
@@ -255,15 +259,21 @@ const listActiveProjectTasks = async (projectId: string): Promise<ITodoistTask[]
 
 const listProjectCollaborators = async (projectId: string): Promise<ITodoistCollaborator[]> => {
   try {
-    const response = await todoistClient.get<ITodoistCollaborator[]>(
-      `/rest/v2/projects/${encodeURIComponent(projectId)}/collaborators`,
+    const response = await todoistClient.get<
+      ITodoistCollaborator[] | ITodoistCollaboratorsResponseV1
+    >(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/collaborators`,
       { headers: getTodoistAuthHeaders() },
     );
-    return response.data ?? [];
+    if (Array.isArray(response.data)) {
+      return response.data;
+    }
+    return response.data?.results ?? [];
   } catch (err: any) {
     if (
       Number(err?.response?.status ?? 0) === 403 ||
-      Number(err?.response?.status ?? 0) === 404
+      Number(err?.response?.status ?? 0) === 404 ||
+      Number(err?.response?.status ?? 0) === 410
     ) {
       return [];
     }
