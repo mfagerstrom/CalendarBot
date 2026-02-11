@@ -55,7 +55,7 @@ describe("mikeTodoListService recurring task rendering", () => {
     assert.equal(String(visible[0].id), "recurring-weekly");
   });
 
-  it("keeps non-recurring filtering behavior unchanged", () => {
+  it("includes overdue non-recurring tasks when includeOverdue is enabled", () => {
     const start = "2026-02-11";
     const tasks = [
       buildTask({ due: { date: addDays(start, -1), is_recurring: false }, id: "past" }),
@@ -64,9 +64,25 @@ describe("mikeTodoListService recurring task rendering", () => {
       buildTask({ due: undefined, id: "no-due" }),
     ];
 
+    const visible = __mikeTodoListTestables.filterVisibleTasks(tasks, {
+      includeOverdue: true,
+      startYmd: start,
+    });
+    const visibleIds = visible.map((task) => String(task.id));
+    assert.deepEqual(visibleIds, ["past", "today", "future", "no-due"]);
+  });
+
+  it("still excludes overdue tasks when includeOverdue is not enabled", () => {
+    const start = "2026-02-11";
+    const tasks = [
+      buildTask({ due: { date: addDays(start, -1), is_recurring: false }, id: "past" }),
+      buildTask({ due: { date: start, is_recurring: false }, id: "today" }),
+      buildTask({ due: { date: addDays(start, 2), is_recurring: false }, id: "future" }),
+    ];
+
     const visible = __mikeTodoListTestables.filterVisibleTasks(tasks, { startYmd: start });
     const visibleIds = visible.map((task) => String(task.id));
-    assert.deepEqual(visibleIds, ["today", "future", "no-due"]);
+    assert.deepEqual(visibleIds, ["today", "future"]);
   });
 
   it("does not duplicate recurring tasks when duplicate ids are present", () => {

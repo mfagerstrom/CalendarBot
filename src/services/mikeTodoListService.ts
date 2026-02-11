@@ -44,6 +44,7 @@ interface ITodoistTask {
 
 interface ITaskRenderRange {
   endYmd?: string;
+  includeOverdue?: boolean;
   startYmd: string;
 }
 
@@ -202,10 +203,13 @@ const isYmdInRenderRange = (dueYmd: string, range: ITaskRenderRange): boolean =>
   if (!isValidYmd(dueYmd)) {
     return false;
   }
-  if (dueYmd < range.startYmd) {
+  if (range.endYmd && dueYmd > range.endYmd) {
     return false;
   }
-  if (range.endYmd && dueYmd > range.endYmd) {
+  if (range.includeOverdue) {
+    return true;
+  }
+  if (dueYmd < range.startYmd) {
     return false;
   }
   return true;
@@ -624,7 +628,10 @@ const getMikeTodoListData = async (): Promise<IMikeTodoListData> => {
   ]);
 
   const todayYmd = formatYmdInTimezone(new Date(), REMINDER_TIMEZONE);
-  const visibleTasks = filterVisibleTasks(activeTasks, { startYmd: todayYmd });
+  const visibleTasks = filterVisibleTasks(activeTasks, {
+    includeOverdue: true,
+    startYmd: todayYmd,
+  });
   return buildTodoListData(project, sections, visibleTasks, collaborators);
 };
 
