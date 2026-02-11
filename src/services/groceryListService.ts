@@ -11,8 +11,6 @@ import { query } from "../lib/db/oracle.js";
 const REMINDER_TIMEZONE = "America/New_York";
 const GROCERY_SYNC_INTERVAL_MS = 60 * 1000;
 const TODOIST_API_BASE_URL = "https://api.todoist.com";
-const TODOIST_COMPLETED_LIMIT = 200;
-const COMPLETED_ITEM_RETENTION_MS = 2 * 60 * 60 * 1000;
 
 interface ITodoistProject {
   id: string;
@@ -32,18 +30,6 @@ interface ITodoistTask {
   id: string;
   is_completed?: boolean;
   section_id?: string;
-}
-
-interface ITodoistCompletedItem {
-  completed_at?: string;
-  completed_by_id?: string | number;
-  completed_by_uid?: string | number;
-  content?: string;
-  section_id?: string;
-}
-
-interface ITodoistCompletedResponse {
-  items?: ITodoistCompletedItem[];
 }
 
 interface ITodoistCollaborator {
@@ -92,20 +78,6 @@ const formatTimestampEt = (date: Date): string => {
     timeZone: REMINDER_TIMEZONE,
   }).format(date);
   return `${text} ET`;
-};
-
-const isCompletedWithinRetentionWindow = (completedAtRaw?: string): boolean => {
-  if (!completedAtRaw) {
-    return false;
-  }
-
-  const completedAt = new Date(completedAtRaw);
-  if (Number.isNaN(completedAt.getTime())) {
-    return false;
-  }
-
-  const ageMs = Date.now() - completedAt.getTime();
-  return ageMs >= 0 && ageMs <= COMPLETED_ITEM_RETENTION_MS;
 };
 
 const getTodoistAuthHeaders = (): Record<string, string> => {
@@ -187,28 +159,6 @@ const listActiveProjectTasks = async (projectId: string): Promise<ITodoistTask[]
   return response.data ?? [];
 };
 
-const listCompletedProjectTasks = async (projectId: string): Promise<ITodoistCompletedItem[]> => {
-  try {
-    const response = await todoistClient.get<ITodoistCompletedResponse>(
-      "/sync/v9/completed/get_all",
-      {
-        headers: getTodoistAuthHeaders(),
-        params: {
-          limit: TODOIST_COMPLETED_LIMIT,
-          project_id: projectId,
-        },
-      },
-    );
-    return response.data?.items ?? [];
-  } catch (err: any) {
-    // Completed endpoint can be unavailable for some plans or token scopes.
-    if (Number(err?.response?.status ?? 0) === 404) {
-      return [];
-    }
-    throw err;
-  }
-};
-
 const listProjectCollaborators = async (projectId: string): Promise<ITodoistCollaborator[]> => {
   try {
     const response = await todoistClient.get<ITodoistCollaborator[]>(
@@ -249,7 +199,6 @@ const buildGroceryListData = (
   project: ITodoistProject,
   sections: ITodoistSection[],
   activeTasks: ITodoistTask[],
-  completedItems: ITodoistCompletedItem[],
   collaborators: ITodoistCollaborator[],
 ): IGroceryListData => {
   const sectionMap = new Map<string, ISectionSnapshot>();
@@ -312,33 +261,6 @@ const buildGroceryListData = (
     }
   }
 
-  for (const item of completedItems) {
-    const text = normalizeItemText(item.content ?? "");
-    if (!text) {
-      continue;
-    }
-    const completedAt = String(item.completed_at ?? "");
-    if (!isCompletedWithinRetentionWindow(completedAt)) {
-      continue;
-    }
-    const sectionId = item.section_id ? String(item.section_id) : rootSectionId;
-    const section = getOrCreateSection(
-      sectionMap,
-      sectionId,
-      rootSectionName,
-      Number.MAX_SAFE_INTEGER,
-    );
-    section.completedItems.push({
-      completedAt: completedAt || undefined,
-      text,
-    });
-
-    if (completedAt && completedAt > sourceUpdatedAt) {
-      sourceUpdatedAt = completedAt;
-      sourceUpdatedById = String(item.completed_by_id ?? item.completed_by_uid ?? "");
-    }
-  }
-
   const orderedSections = Array.from(sectionMap.values())
     .filter((section) => section.neededItems.length > 0 || section.completedItems.length > 0)
     .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
@@ -378,14 +300,13 @@ const getGroceryListData = async (): Promise<IGroceryListData> => {
     throw new Error("Todoist project ID was empty.");
   }
 
-  const [sections, activeTasks, completedItems, collaborators] = await Promise.all([
+  const [sections, activeTasks, collaborators] = await Promise.all([
     listProjectSections(projectId),
     listActiveProjectTasks(projectId),
-    listCompletedProjectTasks(projectId),
     listProjectCollaborators(projectId),
   ]);
 
-  const data = buildGroceryListData(project, sections, activeTasks, completedItems, collaborators);
+  const data = buildGroceryListData(project, sections, activeTasks, collaborators);
   if (!TODOIST_CONFIG.groceryProjectId && data.listId) {
     cachedProjectId = data.listId;
   }

@@ -92,6 +92,7 @@ export default [
       "local/no-components-v2-with-content": "error",
       "local/require-components-v2-flag": "error",
       "local/custom-id-has-matching-handler": "error",
+      "local/no-deprecated-todoist-sync-v9": "error",
     },
   },
   {

@@ -40,6 +40,7 @@ const DISALLOWED_TOP_LEVEL_COMPONENT_BUILDERS = new Set([
   "ThumbnailBuilder",
   "SeparatorBuilder",
 ]);
+const DEPRECATED_TODOIST_PATH_PATTERNS = ["/sync/v9/"];
 
 function isRelativeImportPath(value) {
   return typeof value === "string" && value.startsWith(".");
@@ -1202,6 +1203,40 @@ export default {
                 },
               });
             }
+          },
+        };
+      },
+    },
+    "no-deprecated-todoist-sync-v9": {
+      meta: {
+        type: "problem",
+        docs: {
+          description:
+            "Disallow deprecated Todoist Sync API v9 endpoints.",
+        },
+        schema: [],
+        messages: {
+          deprecatedTodoistPath:
+            "Todoist Sync API v9 is deprecated. Use Todoist REST v2 endpoints instead.",
+        },
+      },
+      create(context) {
+        const reportIfDeprecatedPath = (node, text) => {
+          if (typeof text !== "string") return;
+          for (const pattern of DEPRECATED_TODOIST_PATH_PATTERNS) {
+            if (!text.includes(pattern)) continue;
+            context.report({ node, messageId: "deprecatedTodoistPath" });
+            return;
+          }
+        };
+
+        return {
+          Literal(node) {
+            if (typeof node.value !== "string") return;
+            reportIfDeprecatedPath(node, node.value);
+          },
+          TemplateElement(node) {
+            reportIfDeprecatedPath(node, node.value?.cooked ?? node.value?.raw);
           },
         };
       },
