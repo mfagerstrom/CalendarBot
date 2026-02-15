@@ -265,9 +265,12 @@ export const buildHelpWantedListComponents = (
   );
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      "-# How to add a request: use `/help request`\n" +
-      "-# `description` (required): what you need help with, written in plain words.\n" +
-      "-# `role_1` (required): the first group of people to notify (for example, a team role).\n",
+      "## Instructions\n" +
+      "1. Run the command `/help request` to post a new help request.\n" +
+      "2. `description` (required): write what you need help with in plain language.\n" +
+      "3. `role_1` (required): choose the first group to notify.\n" +
+      "4. `role_2` (optional): choose a second group if more people should be notified.\n" +
+      "5. `requester` (optional): fill this in only if you are posting on someone else's behalf.",
     ),
   );
 
