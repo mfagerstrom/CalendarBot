@@ -264,7 +264,13 @@ export const buildHelpWantedListComponents = (
     new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(false),
   );
   container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent("-# Need help?  use the `/help request` command"),
+    new TextDisplayBuilder().setContent(
+      "-# How to add a request: use `/help request`\n" +
+      "-# `description` (required): what you need help with, written in plain words.\n" +
+      "-# `role_1` (required): the first group of people to notify (for example, a team role).\n" +
+      "-# `role_2` (optional): a second group to notify if more than one team should see it.\n" +
+      "-# `requester` (optional): use this if you are posting for someone else. Leave blank if this is for you.",
+    ),
   );
 
   const components: Array<ContainerBuilder | ActionRowBuilder<StringSelectMenuBuilder>> = [
