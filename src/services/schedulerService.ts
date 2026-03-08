@@ -13,9 +13,61 @@ import { ensureHelpWantedMessage } from "./helpWantedService.js";
 import { ensureArrangementQueueMessage } from "./arrangementQueueService.js";
 import { startGroceryListSyncService } from "./groceryListService.js";
 import { startMikeTodoListSyncService } from "./mikeTodoListService.js";
+import { TextChannel } from "discord.js";
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const INVALID_GRANT_ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 hours
 let lastCheckedDate = new Date().toDateString();
+const invalidGrantAlertTimes = new Map<string, number>();
+
+const isInvalidGrantError = (err: unknown): boolean => {
+    if (!err || typeof err !== "object") {
+        return false;
+    }
+
+    const errObj = err as {
+        message?: unknown;
+        response?: { data?: { error?: unknown } };
+    };
+    const responseError = String(errObj.response?.data?.error ?? "").toLowerCase();
+    if (responseError === "invalid_grant") {
+        return true;
+    }
+
+    const message = String(errObj.message ?? "").toLowerCase();
+    return message.includes("invalid_grant");
+};
+
+const sendInvalidGrantAlert = async (
+    client: Client,
+    discordUserId: string,
+    calendarId: string,
+): Promise<void> => {
+    const alertKey = `${discordUserId}:${calendarId}`;
+    const now = Date.now();
+    const lastAlert = invalidGrantAlertTimes.get(alertKey) ?? 0;
+    if ((now - lastAlert) < INVALID_GRANT_ALERT_COOLDOWN_MS) {
+        return;
+    }
+
+    const channel = await client.channels.fetch(CHANNELS.BOT_LOGS).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+        return;
+    }
+
+    const content =
+        `<@${USERS.MIKE}> OAuth refresh failed for calendar sync.\n`
+        + `User: <@${discordUserId}> (\`${discordUserId}\`)\n`
+        + `Calendar ID: \`${calendarId}\`\n`
+        + "Google returned `invalid_grant`. Re-run `/connect` for this user.";
+
+    await (channel as TextChannel).send({
+        content,
+        allowedMentions: { parse: ["users", "everyone"] },
+    });
+
+    invalidGrantAlertTimes.set(alertKey, now);
+};
 
 export const startCalendarSyncService = (client: Client) => {
     console.log("Starting Calendar Sync Service...");
@@ -66,6 +118,13 @@ export const startCalendarSyncService = (client: Client) => {
                     }
                 } catch (err) {
                     console.error(`Error syncing calendar ${sub.calendarName} for user ${sub.discordUserId}:`, err);
+                    if (isInvalidGrantError(err)) {
+                        try {
+                            await sendInvalidGrantAlert(client, sub.discordUserId, sub.calendarId);
+                        } catch (alertErr) {
+                            console.error("Failed to send invalid_grant alert:", alertErr);
+                        }
+                    }
                 }
             }
 
