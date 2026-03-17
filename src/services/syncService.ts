@@ -89,6 +89,7 @@ export const syncCalendarEvents = async (
         try {
             const params: calendar_v3.Params$Resource$Events$List = {
                 calendarId: calendarId,
+                showDeleted: true,
                 singleEvents: true, // Expand recurring events
                 pageToken: pageToken,
             };

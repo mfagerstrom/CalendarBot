@@ -172,6 +172,37 @@ const isMissingWeekMessagesTableError = (err: any): boolean => {
     return message.includes("ORA-00942");
 };
 
+const deleteWeekMessages = async (
+    channel: any,
+    messageIds: string[],
+): Promise<void> => {
+    for (const messageId of messageIds) {
+        try {
+            const message = await channel.messages.fetch(messageId);
+            await message.delete();
+        } catch {
+            // Already gone or inaccessible.
+        }
+    }
+};
+
+const createWeekMessages = async (
+    channel: any,
+    messageComponents: ContainerBuilder[][],
+): Promise<string[]> => {
+    const createdMessageIds: string[] = [];
+
+    for (const components of messageComponents) {
+        const message = await channel.send({
+            components,
+            flags: MessageFlags.IsComponentsV2 as any,
+        });
+        createdMessageIds.push(message.id);
+    }
+
+    return createdMessageIds;
+};
+
 const reconcileWeekMessagesForChannel = async (
     client: Client,
     channelId: string,
@@ -181,6 +212,11 @@ const reconcileWeekMessagesForChannel = async (
     const channel = await client.channels.fetch(channelId);
     if (!channel || !channel.isTextBased()) {
         return [];
+    }
+
+    if (existingMessageIds.length !== messageComponents.length) {
+        await deleteWeekMessages(channel, existingMessageIds);
+        return createWeekMessages(channel, messageComponents);
     }
 
     const finalMessageIds: string[] = [];
@@ -197,24 +233,9 @@ const reconcileWeekMessagesForChannel = async (
                 finalMessageIds.push(existingMessageId);
                 continue;
             } catch {
-                // Message was likely deleted. Send a replacement below.
+                await deleteWeekMessages(channel, existingMessageIds);
+                return createWeekMessages(channel, messageComponents);
             }
-        }
-
-        const newMessage = await (channel as any).send({
-            components: messageComponents[i],
-            flags: MessageFlags.IsComponentsV2 as any,
-        });
-        finalMessageIds.push(newMessage.id);
-    }
-
-    for (let i = messageComponents.length; i < existingMessageIds.length; i++) {
-        const staleId = existingMessageIds[i];
-        try {
-            const staleMessage = await (channel as any).messages.fetch(staleId);
-            await staleMessage.delete();
-        } catch {
-            // Already gone.
         }
     }
 

@@ -18,7 +18,7 @@ export class ConnectCommand {
       console.log(`Generated auth URL for user ${interaction.user.id}: ${url}`);
 
       const container = new ContainerBuilder()
-        .addTextDisplayComponents(new TextDisplayBuilder().setContent(`Click this link to authorize the bot to access your Google Calendar:\n${url}\n\nThis link will expire in a short time.`));
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent(`Click this link to authorize the bot to access your Google Calendar:\n${url}\n\nThis link will expire in a short time.\n\nNOTE: this needs to be done on the bot host PC to be able to capture the token correctly.`));
 
       await interaction.reply({
         components: [container],
