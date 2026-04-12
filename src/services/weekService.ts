@@ -16,6 +16,11 @@ import { MessageFlags } from "discord.js";
 import { Client } from "discordx";
 import { applyReminderFlags, getReminderRules } from "./reminderService.js";
 
+const WEEK_DAY_HEADER_REGEX = /^# (Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), [A-Z][a-z]{2} \d{1,2}$/;
+const WEEK_MESSAGE_CLEANUP_BATCH_SIZE = 100;
+const WEEK_MESSAGE_CLEANUP_LIMIT = 500;
+const WEEK_MESSAGE_FLAGS = MessageFlags.IsComponentsV2 | MessageFlags.SuppressNotifications;
+
 export const getWeekEventData = async (userId: string) => {
     // 1. Get Timezone
     const timezone = "America/New_York";
@@ -176,7 +181,9 @@ const deleteWeekMessages = async (
     channel: any,
     messageIds: string[],
 ): Promise<void> => {
-    for (const messageId of messageIds) {
+    const uniqueMessageIds = Array.from(new Set(messageIds));
+
+    for (const messageId of uniqueMessageIds) {
         try {
             const message = await channel.messages.fetch(messageId);
             await message.delete();
@@ -195,12 +202,121 @@ const createWeekMessages = async (
     for (const components of messageComponents) {
         const message = await channel.send({
             components,
-            flags: MessageFlags.IsComponentsV2 as any,
+            flags: WEEK_MESSAGE_FLAGS,
         });
         createdMessageIds.push(message.id);
     }
 
     return createdMessageIds;
+};
+
+const fetchWeekMessagesById = async (
+    channel: any,
+    messageIds: string[],
+): Promise<any[] | null> => {
+    const messages: any[] = [];
+
+    for (const messageId of messageIds) {
+        try {
+            messages.push(await (channel as any).messages.fetch(messageId));
+        } catch {
+            return null;
+        }
+    }
+
+    return messages;
+};
+
+const areMessagesInDateOrder = (messages: any[]): boolean => {
+    for (let index = 1; index < messages.length; index++) {
+        const previousTimestamp = Number(messages[index - 1].createdTimestamp ?? 0);
+        const currentTimestamp = Number(messages[index].createdTimestamp ?? 0);
+
+        if (previousTimestamp > currentTimestamp) {
+            return false;
+        }
+    }
+
+    return true;
+};
+
+const getComponentTextValues = (component: any): string[] => {
+    if (!component || typeof component !== "object") {
+        return [];
+    }
+
+    const values: string[] = [];
+    const content = component.content ?? component.data?.content;
+    if (typeof content === "string") {
+        values.push(content);
+    }
+
+    const children = component.components ?? component.data?.components;
+    if (Array.isArray(children)) {
+        for (const child of children) {
+            values.push(...getComponentTextValues(child));
+        }
+    }
+
+    return values;
+};
+
+const getWeekDayHeaderFromMessage = (message: any): string | null => {
+    const componentTextValues = Array.from(message.components?.values?.() ?? message.components ?? [])
+        .flatMap(getComponentTextValues);
+
+    for (const text of componentTextValues) {
+        const firstLine = text.trim().split(/\r?\n/, 1)[0]?.trim();
+        if (firstLine && WEEK_DAY_HEADER_REGEX.test(firstLine)) {
+            return firstLine;
+        }
+    }
+
+    return null;
+};
+
+const cleanupExtraWeekMessages = async (
+    client: Client,
+    channel: any,
+    finalMessageIds: string[],
+): Promise<void> => {
+    const botUserId = client.user?.id;
+    if (!botUserId) {
+        return;
+    }
+
+    const finalMessageIdSet = new Set(finalMessageIds);
+    let before: string | undefined;
+    let scannedCount = 0;
+
+    while (scannedCount < WEEK_MESSAGE_CLEANUP_LIMIT) {
+        const remainingCount = WEEK_MESSAGE_CLEANUP_LIMIT - scannedCount;
+        const limit = Math.min(WEEK_MESSAGE_CLEANUP_BATCH_SIZE, remainingCount);
+        const messages = await channel.messages.fetch({ before, limit });
+
+        if (messages.size === 0) {
+            break;
+        }
+
+        for (const message of messages.values()) {
+            scannedCount += 1;
+            before = message.id;
+
+            if (message.author?.id !== botUserId || finalMessageIdSet.has(message.id)) {
+                continue;
+            }
+
+            if (!getWeekDayHeaderFromMessage(message)) {
+                continue;
+            }
+
+            try {
+                await message.delete();
+            } catch {
+                // Already gone or inaccessible.
+            }
+        }
+    }
 };
 
 const reconcileWeekMessagesForChannel = async (
@@ -216,29 +332,37 @@ const reconcileWeekMessagesForChannel = async (
 
     if (existingMessageIds.length !== messageComponents.length) {
         await deleteWeekMessages(channel, existingMessageIds);
-        return createWeekMessages(channel, messageComponents);
+        const createdMessageIds = await createWeekMessages(channel, messageComponents);
+        await cleanupExtraWeekMessages(client, channel, createdMessageIds);
+        return createdMessageIds;
+    }
+
+    const existingMessages = await fetchWeekMessagesById(channel, existingMessageIds);
+    if (!existingMessages || !areMessagesInDateOrder(existingMessages)) {
+        await deleteWeekMessages(channel, existingMessageIds);
+        const createdMessageIds = await createWeekMessages(channel, messageComponents);
+        await cleanupExtraWeekMessages(client, channel, createdMessageIds);
+        return createdMessageIds;
     }
 
     const finalMessageIds: string[] = [];
 
     for (let i = 0; i < messageComponents.length; i++) {
-        const existingMessageId = existingMessageIds[i];
-        if (existingMessageId) {
-            try {
-                const existingMessage = await (channel as any).messages.fetch(existingMessageId);
-                await existingMessage.edit({
-                    components: messageComponents[i],
-                    flags: MessageFlags.IsComponentsV2 as any,
-                });
-                finalMessageIds.push(existingMessageId);
-                continue;
-            } catch {
-                await deleteWeekMessages(channel, existingMessageIds);
-                return createWeekMessages(channel, messageComponents);
-            }
+        try {
+            await existingMessages[i].edit({
+                components: messageComponents[i],
+                flags: WEEK_MESSAGE_FLAGS,
+            });
+            finalMessageIds.push(existingMessageIds[i]);
+        } catch {
+            await deleteWeekMessages(channel, existingMessageIds);
+            const createdMessageIds = await createWeekMessages(channel, messageComponents);
+            await cleanupExtraWeekMessages(client, channel, createdMessageIds);
+            return createdMessageIds;
         }
     }
 
+    await cleanupExtraWeekMessages(client, channel, finalMessageIds);
     return finalMessageIds;
 };
 
