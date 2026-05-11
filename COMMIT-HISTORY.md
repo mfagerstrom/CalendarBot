@@ -1,5 +1,6 @@
 # Commit History
-Last synced: 2026-04-12 (session sync)
+Last synced: 2026-05-11 (session sync)
+- 2026-04-12: 74b6df8 feat: hopefully corrected 30 day channel logic
 - 2026-03-17: 89c38ab calendar fixes
 - 2026-03-08: 397627e fix: noisy alert implemented for expired google calendar connections
 - 2026-02-15: 760a314 fix: improved help text for help wanted

@@ -9,10 +9,7 @@ import { CHANNELS } from "../config/channels.js";
 import { USERS } from "../config/users.js";
 import { Client } from "discordx";
 import { processReminders, refreshActiveReminderMessages } from "./reminderService.js";
-import { ensureHelpWantedMessage } from "./helpWantedService.js";
 import { ensureArrangementQueueMessage } from "./arrangementQueueService.js";
-import { startGroceryListSyncService } from "./groceryListService.js";
-import { startMikeTodoListSyncService } from "./mikeTodoListService.js";
 import { TextChannel } from "discord.js";
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
@@ -89,7 +86,6 @@ export const startCalendarSyncService = (client: Client) => {
                 // Ensure MIKE's calendar is in the TODAY channel
                 await ensureStaticTodayMessage(client, USERS.MIKE, CHANNELS.TODAY);
                 await ensureStaticWeekMessages(client, USERS.MIKE, CHANNELS.THIS_WEEK);
-                await ensureHelpWantedMessage(client, CHANNELS.HELP_WANTED);
             } catch (err) {
                 console.error("Failed to ensure static calendar messages:", err);
             }
@@ -152,8 +148,6 @@ export const startCalendarSyncService = (client: Client) => {
         try {
             await ensureArrangementQueueMessage(client, CHANNELS.ARRANGEMENTS_QUEUE);
             await refreshActiveReminderMessages(client);
-            startGroceryListSyncService(client, CHANNELS.GROCERY_LIST);
-            startMikeTodoListSyncService(client, CHANNELS.TODO_LIST);
         } catch (err) {
             console.error("Failed to run startup refresh tasks:", err);
         }
