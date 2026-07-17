@@ -53,6 +53,20 @@ npm run build
 npm run start
 ```
 
+## Docker
+The bot ships as a container image published to GHCR on every push to `main` (see `.github/workflows/docker-publish.yml`).
+
+Deploy with Docker Compose:
+```bash
+docker compose up -d
+```
+
+This runs two services:
+- `bot` the CalendarBot container, pulling `ghcr.io/mfagerstrom/calendarbot:latest`
+- `watchtower` polls for new image versions every 5 minutes and auto-updates the running container
+
+Place your `.env` file (see above) next to `docker-compose.yml`. The bot's OAuth callback server listens on `PORT` (default `3000`), which is published to the host.
+
 ## Scripts
 - `npm run lint` ESLint
 - `npm run compile` TypeScript typecheck
